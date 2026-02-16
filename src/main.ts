@@ -3,7 +3,11 @@ import './style.css';
 import { SFX } from './sfx';
 
 /* ── globals ── */
-let baseWood = 0, baseStone = 0;
+let baseLogs = 0, baseRubble = 0;
+let basePlanks = 0, baseBricks = 0;
+let millInputLogs = 0, qryInputRubble = 0;
+let furnaceLit = true;
+let furnaceEverFueled = false;
 let hasBow = false, hasCoat = false;
 const sfx = new SFX();
 
@@ -16,11 +20,14 @@ const WOLF_SLOW = 40, WOLF_FAST = 80, WOLF_HP = 30;
 const ARROW_SPEED = 400, ARROW_DMG = 15, SHOOT_SLOW = 500;
 const WOLF_MAX_MAP = 6;
 const TREE_CAP = 5, STONE_CAP = 20;
+const FURNACE_LOG_CAP = 30, FURNACE_RUBBLE_CAP = 30;
+const MILL_PLANK_CAP = 100, QRY_BRICK_CAP = 100;
+const REFINE_TICK = 2_000, FUEL_TICK = 5_000;
 
-interface Res { sprite: Phaser.GameObjects.Sprite; kind: 'wood' | 'stone' | 'snow'; capacity?: number; ready?: boolean; timer?: number }
+interface Res { sprite: Phaser.GameObjects.Sprite; kind: 'logs' | 'rubble' | 'snow'; capacity?: number; ready?: boolean; timer?: number }
 interface Bld { sprite: Phaser.GameObjects.Sprite; kind: string; hp: number; maxHp: number; bar: Phaser.GameObjects.Graphics; lbl: Phaser.GameObjects.Text }
 interface Bush { sprite: Phaser.GameObjects.Sprite; ready: boolean; timer: number }
-interface Wolf { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body; angle: number; cd: number; hp: number; stunTimer: number }
+interface Wolf { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body; angle: number; cd: number; hp: number; stunTimer: number; attackTarget: Bld | null; attackCd: number }
 interface Arrow { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body; vx: number; vy: number; life: number }
 interface Trap { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body }
 
@@ -30,7 +37,7 @@ class Game extends Phaser.Scene {
   private waddle: Phaser.Tweens.Tween | null = null;
   private k!: Record<string, Phaser.Input.Keyboard.Key>;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-  private bp = { wood: 0, stone: 0, snow: 0, berries: 0, arrows: 0, pelts: 0, meat: 0 };
+  private bp = { logs: 0, rubble: 0, snow: 0, berries: 0, arrows: 0, pelts: 0, meat: 0 };
   private res: Res[] = [];
   private blds: Bld[] = [];
   private furnace: Bld | null = null;
@@ -48,6 +55,12 @@ class Game extends Phaser.Scene {
   private playerHunger = 100;
   private readonly MAX_HUNGER = 100;
   private hungerClock = 0;
+  private playerTemp = 100;
+  private readonly MAX_TEMP = 100;
+  private furnaceLvl = 1;
+  private millTimer = 0;
+  private qryTimer = 0;
+  private fuelTimer = 0;
   private isInside: Bld | null = null;
   // day/night
   private dayClock = 0;
@@ -76,7 +89,7 @@ class Game extends Phaser.Scene {
   // action pose
   private poseTimer = 0;
   // build timer
-  private building: { kind: string; tex: string; sc: number; wx: number; wy: number; dur: number; elapsed: number; bar: Phaser.GameObjects.Graphics; bgBar: Phaser.GameObjects.Graphics; lbl: Phaser.GameObjects.Text } | null = null;
+  private building: { kind: string; tex: string; sc: number; wx: number; wy: number; dur: number; elapsed: number; bar: Phaser.GameObjects.Graphics; bgBar: Phaser.GameObjects.Graphics; lbl: Phaser.GameObjects.Text; paused: boolean; ghost: Phaser.GameObjects.Sprite | null } | null = null;
   // pause
   private paused = false;
   private pauseOverlay: HTMLDivElement | null = null;
@@ -85,10 +98,25 @@ class Game extends Phaser.Scene {
   private msgEl!: HTMLDivElement;
   private msgT: number | null = null;
   private stepTimer = 0;
+  private footprintTimer = 0;
 
   constructor() { super('Game'); }
   private lit<T extends Phaser.GameObjects.Sprite>(s: T): T { s.setPipeline('Light2D'); return s; }
-  private bpTotal(): number { return this.bp.wood + this.bp.stone + this.bp.snow + this.bp.berries + this.bp.arrows + this.bp.pelts + this.bp.meat; }
+  private bpTotal(): number { return this.bp.logs + this.bp.rubble + this.bp.snow + this.bp.berries + this.bp.arrows + this.bp.pelts + this.bp.meat; }
+  /** Total logs available (backpack + furnace storage) */
+  private totalLogs(): number { return this.bp.logs + baseLogs; }
+  /** Total rubble available (backpack + furnace storage) */
+  private totalRubble(): number { return this.bp.rubble + baseRubble; }
+  /** Spend n logs: deducts from backpack first, then furnace storage */
+  private spendLogs(n: number) {
+    const fromBp = Math.min(this.bp.logs, n); this.bp.logs -= fromBp; n -= fromBp;
+    if (n > 0) { baseLogs -= n; this.pileVis(); }
+  }
+  /** Spend n rubble: deducts from backpack first, then furnace storage */
+  private spendRubble(n: number) {
+    const fromBp = Math.min(this.bp.rubble, n); this.bp.rubble -= fromBp; n -= fromBp;
+    if (n > 0) { baseRubble -= n; this.pileVis(); }
+  }
 
   preload() {
     this.load.image('baseFurnace', '/base_furnace.png');
@@ -119,6 +147,7 @@ class Game extends Phaser.Scene {
     this.load.image('bowGround', '/Bow_and_Arrow_ground.png');
     this.load.image('playerSnow', '/Player_snow.png');
     this.load.image('playerBuilding', '/PLayer_building.png');
+    this.load.image('playerBuilding2', '/Player_Building_2.png');
   }
 
   create() {
@@ -136,9 +165,8 @@ class Game extends Phaser.Scene {
 
     this.genTex();
 
-    // ground
-    for (let i = 0; i < 80; i++)
-      this.add.circle(Phaser.Math.Between(40, MW - 40), Phaser.Math.Between(40, MH - 40), Phaser.Math.Between(2, 7), 0xd4ecf7, 0.35).setDepth(0);
+    // ground – procedural snow terrain
+    this.buildSnowGround();
 
     // player – use playerIdle as default
     this.p = this.lit(this.add.sprite(MW / 2, MH / 2 + 120, 'playerIdle').setScale(PSC));
@@ -181,9 +209,9 @@ class Game extends Phaser.Scene {
 
   update(_t: number, dt: number) {
     if (this.paused) return;
-    const isBusy = !!this.building;
+    const isBusy = !!this.building && !this.building.paused;
     // build timer
-    if (this.building) { this.tickBuilding(dt); }
+    if (this.building && !this.building.paused) { this.tickBuilding(dt); }
 
     // pose timer (skip if building)
     if (!isBusy) {
@@ -212,6 +240,15 @@ class Game extends Phaser.Scene {
       if (vx < 0) this.p.setFlipX(true); else if (vx > 0) this.p.setFlipX(false);
       if (moving) { this.stepTimer -= dt; if (this.stepTimer <= 0) { sfx.step(); this.stepTimer = 280; } }
       else this.stepTimer = 0;
+      // snow footprints
+      if (moving && !this.isInside) {
+        this.footprintTimer -= dt;
+        if (this.footprintTimer <= 0) {
+          this.footprintTimer = 200;
+          const fp = this.add.circle(this.p.x, this.p.y + 15, 3, 0xc8ddef, 0.3).setDepth(1);
+          this.tweens.add({ targets: fp, alpha: 0, duration: 3000, onComplete: () => fp.destroy() });
+        }
+      }
     } else {
       this.pb.setVelocity(0, 0);
       if (this.waddle) { this.waddle.stop(); this.waddle = null; this.p.setScale(PSC); }
@@ -236,8 +273,11 @@ class Game extends Phaser.Scene {
     this.tickDayNight(dt);
     this.tickStorm(dt);
     this.tickHunger(dt);
+    this.tickTemperature(dt);
     this.tickBushes(dt);
     this.tickResources(dt);
+    this.tickRefinement(dt);
+    this.tickFuel(dt);
     this.tickWolves(dt);
     this.tickProjectiles(dt);
     this.refreshHUD();
@@ -274,6 +314,59 @@ class Game extends Phaser.Scene {
     tg.fillStyle(0x8B5E3C); tg.fillCircle(10, 10, 6);
     tg.lineStyle(2, 0xaaaaaa); tg.strokeCircle(10, 10, 8);
     tg.generateTexture('trapTex', 20, 20); tg.destroy();
+    // particle textures
+    const mkPart = (key: string, color: number) => {
+      const pg = this.add.graphics(); pg.fillStyle(color); pg.fillRect(0, 0, 4, 4);
+      pg.generateTexture(key, 4, 4); pg.destroy();
+    };
+    mkPart('partWood', 0x8B5E3C);
+    mkPart('partStone', 0x999999);
+    mkPart('partBlood', 0xcc3333);
+  }
+
+  /* ─── particles ─── */
+  private emitParticles(x: number, y: number, tex: string, count = 6) {
+    this.add.particles(x, y, tex, {
+      speed: { min: 40, max: 100 }, lifespan: 400, quantity: count,
+      gravityY: 120, scale: { start: 1, end: 0 }, alpha: { start: 1, end: 0 },
+      emitting: false
+    }).explode(count);
+  }
+
+  /* ─── procedural snow ground ─── */
+  private buildSnowGround() {
+    const rng = (a: number, b: number) => Phaser.Math.Between(a, b);
+    const g = this.add.graphics().setDepth(0);
+
+    // layer 1 – large soft snow drifts (light patches)
+    const driftColors = [0xe8f0f8, 0xeaf2fc, 0xdfe9f3, 0xf2f7fc, 0xd8e6f0];
+    for (let i = 0; i < 120; i++) {
+      const clr = driftColors[rng(0, driftColors.length - 1)];
+      g.fillStyle(clr, rng(15, 40) / 100);
+      const rx = rng(20, 90), ry = rng(12, 50);
+      g.fillEllipse(rng(0, MW), rng(0, MH), rx, ry);
+    }
+
+    // layer 2 – subtle shadow patches (recesses in snow)
+    for (let i = 0; i < 45; i++) {
+      g.fillStyle(0xb8cce0, rng(5, 15) / 100);
+      g.fillEllipse(rng(0, MW), rng(0, MH), rng(30, 80), rng(10, 30));
+    }
+
+    // layer 3 – sparkle highlights
+    for (let i = 0; i < 200; i++) {
+      const bright = [0xffffff, 0xf8fcff, 0xe8f4ff][rng(0, 2)];
+      g.fillStyle(bright, rng(20, 70) / 100);
+      const r = rng(1, 3);
+      g.fillCircle(rng(0, MW), rng(0, MH), r);
+    }
+
+    // layer 4 – faint wind streaks
+    g.lineStyle(1, 0xcddceb, 0.08);
+    for (let i = 0; i < 60; i++) {
+      const sx = rng(0, MW), sy = rng(0, MH);
+      g.lineBetween(sx, sy, sx + rng(40, 150), sy + rng(-5, 5));
+    }
   }
 
   /* ─── resources ─── */
@@ -281,21 +374,32 @@ class Game extends Phaser.Scene {
     const rng = (a: number, b: number) => Phaser.Math.Between(a, b);
     const cx = MW / 2, cy = MH / 2;
     const far = (x: number, y: number) => Phaser.Math.Distance.Between(x, y, cx, cy) > 450;
-    const mk = (tex: string, kind: 'wood' | 'stone' | 'snow', n: number, sc: number, cap?: number) => {
+    // track all placed positions so we can enforce minimum spacing
+    const placed: { x: number; y: number }[] = [];
+    const MIN_DIST = 80; // minimum distance between any two resource objects
+    const spaced = (x: number, y: number) => {
+      for (const p of placed) {
+        if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < MIN_DIST) return false;
+      }
+      return true;
+    };
+    const mk = (tex: string, kind: 'logs' | 'rubble' | 'snow', n: number, sc: number, cap?: number) => {
       for (let i = 0; i < n; i++) {
-        let x: number, y: number;
-        do { x = rng(80, MW - 80); y = rng(80, MH - 80); } while (!far(x, y));
+        let x: number, y: number, tries = 0;
+        do { x = rng(80, MW - 80); y = rng(80, MH - 80); tries++; } while ((!far(x, y) || !spaced(x, y)) && tries < 200);
+        placed.push({ x, y });
         const r: Res = { sprite: this.lit(this.add.sprite(x, y, tex).setScale(sc)), kind };
         if (cap !== undefined) { r.capacity = cap; r.ready = true; r.timer = 0; }
         this.res.push(r);
       }
     };
-    mk('tree', 'wood', 35, 0.12, TREE_CAP);
-    mk('rock', 'stone', 20, 0.12, STONE_CAP);
+    mk('tree', 'logs', 35, 0.12, TREE_CAP);
+    mk('rock', 'rubble', 20, 0.12, STONE_CAP);
     mk('snowPile', 'snow', 18, 0.12);
     for (let i = 0; i < 15; i++) {
-      let x: number, y: number;
-      do { x = rng(80, MW - 80); y = rng(80, MH - 80); } while (!far(x, y));
+      let x: number, y: number, tries = 0;
+      do { x = rng(80, MW - 80); y = rng(80, MH - 80); tries++; } while ((!far(x, y) || !spaced(x, y)) && tries < 200);
+      placed.push({ x, y });
       this.bushes.push({ sprite: this.lit(this.add.sprite(x, y, 'bushFull').setScale(0.12)), ready: true, timer: 0 });
     }
   }
@@ -305,12 +409,12 @@ class Game extends Phaser.Scene {
     for (const r of this.res) {
       if (r.ready !== false) continue;
       r.timer = (r.timer ?? 0) + dt;
-      if (r.kind === 'wood' && r.timer >= TREE_REGROW) {
+      if (r.kind === 'logs' && r.timer >= TREE_REGROW) {
         r.ready = true; r.capacity = TREE_CAP; r.timer = 0;
         r.sprite.setScale(0.12);
         r.sprite.setTexture(this.sOn ? 'treeBlizzard' : 'tree');
       }
-      if (r.kind === 'stone' && r.timer >= STONE_REGROW) {
+      if (r.kind === 'rubble' && r.timer >= STONE_REGROW) {
         r.ready = true; r.capacity = STONE_CAP; r.timer = 0;
         r.sprite.setScale(0.12);
         r.sprite.setTexture('rock');
@@ -335,7 +439,7 @@ class Game extends Phaser.Scene {
     for (const b of this.blds) {
       if (b.kind === 'fence') this.physics.add.collider(sprite, b.sprite);
     }
-    this.wolves.push({ sprite, body, angle: Math.random() * Math.PI * 2, cd: 0, hp: WOLF_HP, stunTimer: 0 });
+    this.wolves.push({ sprite, body, angle: Math.random() * Math.PI * 2, cd: 0, hp: WOLF_HP, stunTimer: 0, attackTarget: null, attackCd: 0 });
   }
 
   /* ─── day/night ─── */
@@ -363,6 +467,12 @@ class Game extends Phaser.Scene {
     if (this.isInside) { this.exitShelter(); return; }
     const px = this.p.x, py = this.p.y;
 
+    // resume paused build if near site
+    if (this.building && this.building.paused) {
+      const d = Phaser.Math.Distance.Between(px, py, this.building.wx, this.building.wy);
+      if (d < 100) { this.resumeBuild(); return; }
+    }
+
     // pick up ground items (bow)
     for (let i = this.groundItems.length - 1; i >= 0; i--) {
       const gi = this.groundItems[i];
@@ -376,20 +486,29 @@ class Game extends Phaser.Scene {
       }
     }
 
-    // auto-deposit at base (furnace, mill, quarry, or fence area)
-    if (this.nearBase() && (this.bp.wood > 0 || this.bp.stone > 0)) {
-      const w = this.bp.wood, s = this.bp.stone; this.bp.wood = 0; this.bp.stone = 0;
-      baseWood += w; baseStone += s;
-      const parts: string[] = []; if (w > 0) parts.push(`${w} wood`); if (s > 0) parts.push(`${s} stone`);
-      this.msg(`+${parts.join(' + ')} → Base Storage`); sfx.build(); this.pileVis(); return;
+    // auto-deposit at furnace (logs + rubble, partial deposit)
+    if (this.furnace && Phaser.Math.Distance.Between(px, py, this.furnace.sprite.x, this.furnace.sprite.y) < 350 && (this.bp.logs > 0 || this.bp.rubble > 0)) {
+      const depL = Math.min(this.bp.logs, FURNACE_LOG_CAP - baseLogs);
+      const depR = Math.min(this.bp.rubble, FURNACE_RUBBLE_CAP - baseRubble);
+      if (depL > 0 || depR > 0) {
+        this.bp.logs -= depL; this.bp.rubble -= depR;
+        baseLogs += depL; baseRubble += depR;
+        if (depL > 0) furnaceEverFueled = true;
+        const parts: string[] = []; if (depL > 0) parts.push(`${depL} logs`); if (depR > 0) parts.push(`${depR} rubble`);
+        this.msg(`+${parts.join(' + ')} → Furnace`); sfx.build(); this.pileVis(); return;
+      } else {
+        this.msg('Furnace storage full!');
+      }
     }
+    // deposit logs at mill for refining
     if (this.mill) {
       const d = Phaser.Math.Distance.Between(px, py, this.mill.sprite.x, this.mill.sprite.y);
-      if (d < RANGE && this.bp.wood > 0) { const a = this.bp.wood; this.bp.wood = 0; baseWood += a; this.msg(`+${a} wood → Base`); sfx.build(); this.pileVis(); return; }
+      if (d < RANGE && this.bp.logs > 0) { const a = this.bp.logs; this.bp.logs = 0; millInputLogs += a; this.msg(`+${a} logs → Mill (refining)`); sfx.build(); this.pileVis(); return; }
     }
+    // deposit rubble at quarry for refining
     if (this.qry) {
       const d = Phaser.Math.Distance.Between(px, py, this.qry.sprite.x, this.qry.sprite.y);
-      if (d < RANGE && this.bp.stone > 0) { const a = this.bp.stone; this.bp.stone = 0; baseStone += a; this.msg(`+${a} stone → Base`); sfx.build(); this.pileVis(); return; }
+      if (d < RANGE && this.bp.rubble > 0) { const a = this.bp.rubble; this.bp.rubble = 0; qryInputRubble += a; this.msg(`+${a} rubble → Quarry (refining)`); sfx.build(); this.pileVis(); return; }
     }
     // shelter
     const shelterKinds = ['igloo', 'woodHouse', 'stoneHouse'];
@@ -426,9 +545,11 @@ class Game extends Phaser.Scene {
 
     if (k === 'snow') {
       this.setPose('playerSnow', 300);
+      this.emitParticles(best.sprite.x, best.sprite.y, 'partStone', 3);
     }
-    if (k === 'stone') {
+    if (k === 'rubble') {
       this.setPose('playerMine', 300);
+      this.emitParticles(best.sprite.x, best.sprite.y, 'partStone');
       // stone capacity system
       if (best.capacity !== undefined) {
         best.capacity--;
@@ -445,8 +566,9 @@ class Game extends Phaser.Scene {
         this.time.delayedCall(200, () => { if (best!.sprite.active) best!.sprite.setTexture('rock'); });
       }
     }
-    if (k === 'wood') {
+    if (k === 'logs') {
       this.setPose('playerCut', 300);
+      this.emitParticles(best.sprite.x, best.sprite.y, 'partWood');
       // tree capacity system
       best.capacity = (best.capacity ?? TREE_CAP) - 1;
       if (best.capacity! <= 0) {
@@ -484,6 +606,73 @@ class Game extends Phaser.Scene {
     for (const bu of this.bushes) { if (bu.ready) continue; bu.timer += dt; if (bu.timer >= BUSH_REGROW) { bu.ready = true; bu.timer = 0; bu.sprite.setTexture('bushFull'); } }
   }
 
+  /* ─── refinement & fuel ─── */
+  private tickRefinement(dt: number) {
+    // mill: logs → planks
+    if (this.mill) {
+      this.millTimer += dt;
+      if (this.millTimer >= REFINE_TICK && millInputLogs > 0 && basePlanks < MILL_PLANK_CAP) {
+        this.millTimer = 0; millInputLogs--; basePlanks++;
+      }
+    }
+    // quarry: rubble → bricks
+    if (this.qry) {
+      this.qryTimer += dt;
+      if (this.qryTimer >= REFINE_TICK && qryInputRubble > 0 && baseBricks < QRY_BRICK_CAP) {
+        this.qryTimer = 0; qryInputRubble--; baseBricks++;
+      }
+    }
+  }
+  private tickFuel(dt: number) {
+    if (!furnaceEverFueled) return; // don't consume fuel until player has deposited logs
+    this.fuelTimer += dt;
+    if (this.fuelTimer >= FUEL_TICK) {
+      this.fuelTimer = 0;
+      if (baseLogs > 0) {
+        baseLogs--;
+        furnaceLit = true;
+        if (this.furnace) this.furnace.sprite.clearTint();
+        const lightR = [380, 500, 800][this.furnaceLvl - 1];
+        this.fLight.setRadius(lightR);
+      } else {
+        furnaceLit = false;
+        if (this.furnace) this.furnace.sprite.setTint(0x667788);
+        this.fLight.setRadius(0);
+      }
+      this.pileVis();
+    }
+  }
+
+  /* ─── temperature ─── */
+  private tickTemperature(dt: number) {
+    const sec = dt / 1000;
+    let rate = 0; // per second
+    if (this.isInside) {
+      rate = 5; // shelter regen
+    } else {
+      // near furnace?
+      const heatRadius = [150, 300, 600][this.furnaceLvl - 1];
+      const nearFurnace = furnaceLit && this.furnace && Phaser.Math.Distance.Between(this.p.x, this.p.y, this.furnace.sprite.x, this.furnace.sprite.y) < heatRadius;
+      if (nearFurnace) {
+        rate = 2;
+      } else if (this.sOn) {
+        rate = -5;
+      } else if (this.isNight) {
+        rate = -2;
+      } else {
+        rate = -0.5;
+      }
+      // fur coat halves cold
+      if (rate < 0 && hasCoat) rate *= 0.5;
+    }
+    this.playerTemp = Phaser.Math.Clamp(this.playerTemp + rate * sec, 0, this.MAX_TEMP);
+    // freezing damage
+    if (this.playerTemp <= 0) {
+      this.playerHp = Math.max(0, this.playerHp - 2 * sec);
+      if (this.playerHp <= 0) this.gameOver('froze');
+    }
+  }
+
   /* ─── combat: bow & arrow ─── */
   private shootArrow(ptr: Phaser.Input.Pointer) {
     if (!hasBow || this.bp.arrows <= 0 || this.isInside) return;
@@ -510,6 +699,7 @@ class Game extends Phaser.Scene {
         const d = Phaser.Math.Distance.Between(a.sprite.x, a.sprite.y, w.sprite.x, w.sprite.y);
         if (d < 30) {
           w.hp -= ARROW_DMG;
+          this.emitParticles(w.sprite.x, w.sprite.y, 'partBlood');
           w.sprite.setTint(0xffffff);
           this.time.delayedCall(150, () => { if (w.sprite.active) w.sprite.clearTint(); });
           rem.push(a);
@@ -527,8 +717,9 @@ class Game extends Phaser.Scene {
   /* ─── combat: snare trap ─── */
   private placeTrap() {
     if (this.isInside) { this.msg("Can't place traps inside!"); return; }
-    if (this.bp.wood < 5 || this.bp.stone < 5) { this.msg('Need 5 wood + 5 stone (BP)'); return; }
-    this.bp.wood -= 5; this.bp.stone -= 5;
+    if (basePlanks < 5) { this.msg('Need 5 Planks (Mill)'); return; }
+    if (this.totalRubble() < 5) { this.msg('Need 5 Rubble'); return; }
+    basePlanks -= 5; this.spendRubble(5);
     const sprite = this.add.sprite(this.p.x, this.p.y, 'trapTex').setDepth(1);
     this.physics.add.existing(sprite, true);
     this.traps.push({ sprite, body: sprite.body as Phaser.Physics.Arcade.Body });
@@ -557,7 +748,40 @@ class Game extends Phaser.Scene {
         if (w.sprite.texture.key !== 'wolfNight') w.sprite.setTexture('wolfNight');
         w.sprite.setFlipX(px < w.sprite.x);
         if (Math.random() < 0.003) sfx.growl();
+        // siege: if wolf is barely moving, it's blocked by a structure
+        const vel = Math.sqrt(w.body.velocity.x ** 2 + w.body.velocity.y ** 2);
+        if (vel < 10) {
+          // find nearest building to attack
+          if (!w.attackTarget || !w.attackTarget.sprite.active) {
+            let closest: Bld | null = null, cd = 60;
+            for (const b of this.blds) {
+              if (b.kind === 'furnace') continue;
+              const bd = Phaser.Math.Distance.Between(w.sprite.x, w.sprite.y, b.sprite.x, b.sprite.y);
+              if (bd < cd) { cd = bd; closest = b; }
+            }
+            w.attackTarget = closest;
+          }
+          if (w.attackTarget && w.attackTarget.sprite.active) {
+            w.attackCd -= dt;
+            if (w.attackCd <= 0) {
+              w.attackCd = 1500;
+              w.attackTarget.hp--;
+              this.drawBar(w.attackTarget);
+              w.attackTarget.sprite.setTint(0xff6666);
+              this.time.delayedCall(200, () => { if (w.attackTarget?.sprite.active) w.attackTarget.sprite.clearTint(); });
+              this.emitParticles(w.attackTarget.sprite.x, w.attackTarget.sprite.y, 'partWood', 3);
+              if (Math.random() < 0.4) sfx.growl();
+              if (w.attackTarget.hp <= 0) {
+                this.destroyBld(w.attackTarget);
+                w.attackTarget = null;
+              }
+            }
+          }
+        } else {
+          w.attackTarget = null; w.attackCd = 0;
+        }
       } else {
+        w.attackTarget = null; w.attackCd = 0;
         if (w.sprite.texture.key !== 'wolfDay') w.sprite.setTexture('wolfDay');
         if (Math.random() < 0.01) w.angle = Math.random() * Math.PI * 2;
         w.body.setVelocity(Math.cos(w.angle) * spd, Math.sin(w.angle) * spd);
@@ -576,6 +800,7 @@ class Game extends Phaser.Scene {
         w.cd = WOLF_CD;
         this.playerHp = Math.max(0, this.playerHp - WOLF_DMG);
         this.cameras.main.shake(200, 0.008); sfx.hurt(); sfx.growl();
+        this.emitParticles(px, py, 'partBlood', 8);
         const kb = Phaser.Math.Angle.Between(w.sprite.x, w.sprite.y, px, py);
         this.p.setPosition(px + Math.cos(kb) * WOLF_KB, py + Math.sin(kb) * WOLF_KB);
         this.msg(`🐺 Wolf attack! -${WOLF_DMG} HP`);
@@ -599,9 +824,9 @@ class Game extends Phaser.Scene {
   /* ─── crafting ─── */
   private nearBase(): boolean {
     const px = this.p.x, py = this.p.y;
-    // near furnace
+    // near furnace (generous range for base building)
     if (this.furnace) {
-      if (Phaser.Math.Distance.Between(px, py, this.furnace.sprite.x, this.furnace.sprite.y) < RANGE * 2) return true;
+      if (Phaser.Math.Distance.Between(px, py, this.furnace.sprite.x, this.furnace.sprite.y) < 350) return true;
     }
     // inside any fence perimeter (use blds to check fence bounds)
     const fences = this.blds.filter(b => b.kind === 'fence');
@@ -617,8 +842,8 @@ class Game extends Phaser.Scene {
   private craftBow() {
     if (hasBow) { this.msg('Already have a bow!'); return; }
     if (!this.nearBase()) { this.msg('Must be near base to craft!'); return; }
-    if (baseWood < 20) { this.msg('Need 20 wood (Base)'); return; }
-    baseWood -= 20;
+    if (basePlanks < 10) { this.msg('Need 10 Planks (Mill)'); return; }
+    basePlanks -= 10;
     // spawn bow on ground at player's feet
     const bowSprite = this.lit(this.add.sprite(this.p.x, this.p.y + 20, 'bowGround').setScale(0.12));
     this.groundItems.push(bowSprite);
@@ -626,11 +851,11 @@ class Game extends Phaser.Scene {
     this.pileVis();
   }
   private craftArrows() {
-    if (this.bp.wood < 2 || this.bp.stone < 2) { this.msg('Need 2 wood + 2 stone (BP)'); return; }
-    const space = CAP - this.bpTotal() + 4; // +4 because we'll remove 2 wood + 2 stone first
+    if (this.totalLogs() < 2 || this.totalRubble() < 2) { this.msg('Need 2 Logs + 2 Rubble'); return; }
+    const space = CAP - this.bpTotal() + 4;
     const add = Math.min(5, space);
     if (add <= 0) { this.msg('Backpack full!'); return; }
-    this.bp.wood -= 2; this.bp.stone -= 2;
+    this.spendLogs(2); this.spendRubble(2);
     this.bp.arrows += add;
     sfx.build(); this.msg(`Crafted ${add} arrows (${this.bp.arrows} total)`);
   }
@@ -639,6 +864,23 @@ class Game extends Phaser.Scene {
     if (this.bp.pelts < 5) { this.msg('Need 5 pelts (BP)'); return; }
     this.bp.pelts -= 5; hasCoat = true;
     sfx.build(); this.msg('🧥 Fur Coat crafted! Blizzard damage reduced.');
+  }
+  private upgradeFurnace(level: number) {
+    if (this.furnaceLvl >= level) { this.msg('Already upgraded!'); return; }
+    if (level === 2) {
+      if (basePlanks < 30 || baseBricks < 30) { this.msg('Need 30 Planks + 30 Bricks'); return; }
+      basePlanks -= 30; baseBricks -= 30;
+    } else if (level === 3) {
+      if (this.furnaceLvl < 2) { this.msg('Upgrade to Lvl 2 first!'); return; }
+      if (basePlanks < 60 || baseBricks < 60 || this.bp.pelts < 10) { this.msg('Need 60 Planks + 60 Bricks + 10 Pelts'); return; }
+      basePlanks -= 60; baseBricks -= 60; this.bp.pelts -= 10;
+    }
+    this.furnaceLvl = level;
+    const lightR = [380, 500, 800][level - 1];
+    this.fLight.setRadius(lightR);
+    if (this.furnace) this.drawBar(this.furnace);
+    this.pileVis();
+    sfx.build(); this.msg(`🔥 Furnace upgraded to Lvl ${level}!`);
   }
 
   /* ─── buildings ─── */
@@ -651,7 +893,7 @@ class Game extends Phaser.Scene {
   private drawBar(b: Bld) {
     b.bar.clear();
     const names: Record<string, string> = { furnace: '🔥 Furnace', mill: '🪵 Mill', quarry: '⛏️ Quarry', igloo: '🏠 Igloo', woodHouse: '🏡 Wood House', stoneHouse: '🏰 Stone House', fence: '🪵 Fence' };
-    if (b.kind === 'furnace') { b.lbl.setPosition(b.sprite.x, b.sprite.y - b.sprite.displayHeight / 2 - 14); b.lbl.setText(names.furnace); return; }
+    if (b.kind === 'furnace') { b.lbl.setPosition(b.sprite.x, b.sprite.y - b.sprite.displayHeight / 2 - 14); b.lbl.setText(`🔥 Furnace Lvl ${this.furnaceLvl}`); return; }
     const w = 50, h = 6, bx = b.sprite.x - w / 2, by = b.sprite.y - b.sprite.displayHeight / 2 - 12;
     b.bar.fillStyle(0x333333, 0.8); b.bar.fillRect(bx, by, w, h);
     const pct = b.hp / b.maxHp;
@@ -667,28 +909,28 @@ class Game extends Phaser.Scene {
   private placeBld(wx: number, wy: number) {
     const m = this.bMode!; this.cancelBld();
     // build durations in ms
-    const timers: Record<string, number> = { mill: 60_000, quarry: 60_000, igloo: 5_000, woodHouse: 10_000, stoneHouse: 20_000 };
+    const timers: Record<string, number> = { mill: 5_000, quarry: 5_000, igloo: 5_000, woodHouse: 5_000, stoneHouse: 5_000 };
     switch (m) {
       case 'mill':
-        if (this.mill) { this.msg('Already built!'); return; } if (this.bp.wood < 15) { this.msg('Need 15 wood'); return; }
-        this.bp.wood -= 15; this.startBuild('mill', 'lumberMill', 0.18, wx, wy, timers.mill); break;
+        if (this.mill) { this.msg('Already built!'); return; } if (this.totalLogs() < 15) { this.msg('Need 15 Logs'); return; }
+        this.spendLogs(15); this.startBuild('mill', 'lumberMill', 0.18, wx, wy, timers.mill); break;
       case 'quarry':
-        if (this.qry) { this.msg('Already built!'); return; } if (this.bp.stone < 15) { this.msg('Need 15 stone'); return; }
-        this.bp.stone -= 15; this.startBuild('quarry', 'stoneQuarry', 0.18, wx, wy, timers.quarry); break;
+        if (this.qry) { this.msg('Already built!'); return; } if (this.totalRubble() < 15) { this.msg('Need 15 Rubble'); return; }
+        this.spendRubble(15); this.startBuild('quarry', 'stoneQuarry', 0.18, wx, wy, timers.quarry); break;
       case 'igloo':
-        if (this.bp.snow < 10 || this.bp.wood < 5) { this.msg('Need 10 snow+5 wood'); return; }
-        this.bp.snow -= 10; this.bp.wood -= 5; this.startBuild('igloo', 'igloo', 0.18, wx, wy, timers.igloo); break;
+        if (this.bp.snow < 10 || this.totalLogs() < 5) { this.msg('Need 10 Snow + 5 Logs'); return; }
+        this.bp.snow -= 10; this.spendLogs(5); this.startBuild('igloo', 'igloo', 0.18, wx, wy, timers.igloo); break;
       case 'woodHouse':
         if (!this.nearBase()) { this.msg('Must be near base!'); return; }
-        if (baseWood < 60) { this.msg('Need 60 wood (Base)'); return; }
-        baseWood -= 60; this.startBuild('woodHouse', 'woodHouse', 0.18, wx, wy, timers.woodHouse); this.pileVis(); break;
+        if (basePlanks < 40) { this.msg('Need 40 Planks (Mill)'); return; }
+        basePlanks -= 40; this.startBuild('woodHouse', 'woodHouse', 0.18, wx, wy, timers.woodHouse); this.pileVis(); break;
       case 'stoneHouse':
         if (!this.nearBase()) { this.msg('Must be near base!'); return; }
-        if (baseStone < 100 || baseWood < 40) { this.msg('Need 100 stone+40 wood (Base)'); return; }
-        baseStone -= 100; baseWood -= 40; this.startBuild('stoneHouse', 'stoneHouse', 0.18, wx, wy, timers.stoneHouse); this.pileVis(); break;
+        if (baseBricks < 60 || basePlanks < 20) { this.msg('Need 60 Bricks + 20 Planks'); return; }
+        baseBricks -= 60; basePlanks -= 20; this.startBuild('stoneHouse', 'stoneHouse', 0.18, wx, wy, timers.stoneHouse); this.pileVis(); break;
       case 'fence':
-        if (this.bp.wood < 5) { this.msg('Need 5 wood (BP)'); return; }
-        this.bp.wood -= 5;
+        if (this.totalLogs() < 5) { this.msg('Need 5 Logs'); return; }
+        this.spendLogs(5);
         const fb = this.addBld(wx, wy, 'fenceTex', 'fence', 6, 6, 1.0);
         this.physics.add.existing(fb.sprite, true);
         for (const w of this.wolves) this.physics.add.collider(w.sprite, fb.sprite);
@@ -731,21 +973,56 @@ class Game extends Phaser.Scene {
     this.pb.setVelocity(0, 0);
     // set pose based on kind
     const snowKinds = ['igloo'];
-    this.p.setTexture(snowKinds.includes(kind) ? 'playerSnow' : 'playerBuilding');
+    this.p.setTexture(snowKinds.includes(kind) ? 'playerSnow' : 'playerBuilding2');
+    // create ghost placeholder sprite (translucent preview)
+    const ghost = this.add.sprite(wx, wy, tex).setScale(sc).setAlpha(0.35).setDepth(1).setTint(0x88ccff);
     // create progress bar
     const barW = 60, barH = 8;
     const bgBar = this.add.graphics().setDepth(9100);
     bgBar.fillStyle(0x222222, 0.8); bgBar.fillRect(wx - barW / 2, wy - 30, barW, barH);
     const bar = this.add.graphics().setDepth(9101);
     const lbl = this.add.text(wx, wy - 42, `Building...`, { fontSize: '11px', color: '#ffe', fontFamily: 'Arial', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(9102);
-    this.building = { kind, tex, sc, wx, wy, dur, elapsed: 0, bar, bgBar, lbl };
+    this.building = { kind, tex, sc, wx, wy, dur, elapsed: 0, bar, bgBar, lbl, paused: false, ghost };
     this.msg(`🔨 Building ${kind}... (${Math.ceil(dur / 1000)}s)`);
+  }
+  private pauseBuild() {
+    if (!this.building || this.building.paused) return;
+    this.building.paused = true;
+    // update label to show paused state
+    const remain = Math.ceil((this.building.dur - this.building.elapsed) / 1000);
+    this.building.lbl.setText(`⏸ Paused ${remain}s left`);
+    this.building.lbl.setColor('#ffcc44');
+    // restore idle player pose
+    this.p.setTexture('playerIdle');
+    this.msg(`🔨 Build paused — return to site to resume`);
+  }
+  private resumeBuild() {
+    if (!this.building || !this.building.paused) return;
+    const b = this.building;
+    b.paused = false;
+    b.lbl.setColor('#ffe');
+    // move player to build site
+    this.p.setPosition(b.wx, b.wy + 40);
+    this.pb.setVelocity(0, 0);
+    const snowKinds = ['igloo'];
+    this.p.setTexture(snowKinds.includes(b.kind) ? 'playerSnow' : 'playerBuilding2');
+    const remain = Math.ceil((b.dur - b.elapsed) / 1000);
+    this.msg(`🔨 Resuming build... (${remain}s left)`);
   }
   private tickBuilding(dt: number) {
     const b = this.building!;
     b.elapsed += dt;
     // lock player
     this.pb.setVelocity(0, 0);
+    // detect movement keys to pause build
+    if (this.k.A.isDown || this.k.D.isDown || this.k.W.isDown || this.k.S.isDown || this.cursors.left.isDown || this.cursors.right.isDown || this.cursors.up.isDown || this.cursors.down.isDown) {
+      this.pauseBuild(); return;
+    }
+    // hammer swing animation — alternate sprites every 400ms
+    const snowKinds = ['igloo'];
+    const isSnow = snowKinds.includes(b.kind);
+    const frame = Math.floor(b.elapsed / 400) % 2;
+    this.p.setTexture(isSnow ? 'playerSnow' : (frame === 0 ? 'playerBuilding' : 'playerBuilding2'));
     // update bar
     const pct = Math.min(1, b.elapsed / b.dur);
     const barW = 60, barH = 8;
@@ -758,6 +1035,7 @@ class Game extends Phaser.Scene {
   private finishBuild() {
     const b = this.building!;
     b.bar.destroy(); b.bgBar.destroy(); b.lbl.destroy();
+    if (b.ghost) b.ghost.destroy();
     // create the actual building
     const bld = this.addBld(b.wx, b.wy, b.tex, b.kind, this.getBldHp(b.kind), this.getBldHp(b.kind), b.sc);
     if (b.kind === 'mill') this.mill = bld;
@@ -783,21 +1061,21 @@ class Game extends Phaser.Scene {
   private pileVis() {
     const anchor = this.furnace?.sprite;
     if (!anchor) return;
-    // wood pile - positioned to the right of furnace
+    // wood pile (raw logs near furnace)
     if (this.wPile) { this.wPile.destroy(); this.wPile = null; }
     if (this.wPileLbl) { this.wPileLbl.destroy(); this.wPileLbl = null; }
-    if (baseWood > 0) {
+    if (baseLogs > 0) {
       const wx = anchor.x + 140, wy = anchor.y - 20;
       this.wPile = this.lit(this.add.sprite(wx, wy, 'woodPile').setScale(0.12));
-      this.wPileLbl = this.add.text(wx, wy - 45, `🪵 ${baseWood}`, { fontSize: '14px', color: '#ffe', fontFamily: 'Arial Black,Arial', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5).setDepth(9000);
+      this.wPileLbl = this.add.text(wx, wy - 45, `🪵 ${baseLogs}`, { fontSize: '14px', color: '#ffe', fontFamily: 'Arial Black,Arial', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5).setDepth(9000);
     }
-    // stone pile - positioned to the right of furnace, below wood
+    // stone pile (raw rubble near furnace)
     if (this.sPile) { this.sPile.destroy(); this.sPile = null; }
     if (this.sPileLbl) { this.sPileLbl.destroy(); this.sPileLbl = null; }
-    if (baseStone > 0) {
+    if (baseRubble > 0) {
       const sx = anchor.x + 140, sy = anchor.y + 60;
       this.sPile = this.lit(this.add.sprite(sx, sy, 'stonePile').setScale(0.12));
-      this.sPileLbl = this.add.text(sx, sy - 45, `🪨 ${baseStone}`, { fontSize: '14px', color: '#ffe', fontFamily: 'Arial Black,Arial', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5).setDepth(9000);
+      this.sPileLbl = this.add.text(sx, sy - 45, `🪨 ${baseRubble}`, { fontSize: '14px', color: '#ffe', fontFamily: 'Arial Black,Arial', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5).setDepth(9000);
     }
   }
 
@@ -814,30 +1092,29 @@ class Game extends Phaser.Scene {
     this.sOn = true; this.sElap = 0; this.sDmg = STORM_TICK;
     this.sOvr.setFillStyle(0xaaddff, 0.04); this.sLbl.setAlpha(1);
     this.tweens.add({ targets: this.sLbl, alpha: { from: 1, to: 0.4 }, duration: 500, yoyo: true, repeat: -1 });
-    for (const r of this.res) { if (r.kind === 'wood' && r.sprite.active && r.ready !== false) r.sprite.setTexture('treeBlizzard'); }
+    for (const r of this.res) { if (r.kind === 'logs' && r.sprite.active && r.ready !== false) r.sprite.setTexture('treeBlizzard'); }
     sfx.startWind(); this.msg('⚠️ Blizzard incoming!');
   }
   private stormDmg() {
     const rm: Bld[] = [];
     for (const b of this.blds) { if (b.kind === 'furnace') continue; b.hp--; this.drawBar(b); b.sprite.setTint(0xff6666); this.time.delayedCall(300, () => b.sprite.clearTint()); if (b.hp <= 0) rm.push(b); }
     for (const b of rm) this.destroyBld(b);
+    // temperature handles player damage now — just flash if outside
     if (!this.isInside) {
-      const dmg = hasCoat ? 1 : 5;
-      this.playerHp = Math.max(0, this.playerHp - dmg);
-      this.cameras.main.flash(300, 100, 150, 255, true); sfx.hurt();
-      if (this.playerHp <= 0) this.gameOver('froze');
+      this.cameras.main.flash(300, 100, 150, 255, true);
     }
   }
   private endStorm() {
     this.sOn = false; this.sOvr.setAlpha(0);
     this.tweens.killTweensOf(this.sLbl); this.sLbl.setAlpha(0);
-    for (const r of this.res) { if (r.kind === 'wood' && r.sprite.active && r.ready !== false) r.sprite.setTexture('tree'); }
+    for (const r of this.res) { if (r.kind === 'logs' && r.sprite.active && r.ready !== false) r.sprite.setTexture('tree'); }
     sfx.stopWind(); this.msg('Blizzard passed.');
   }
   private destroyBld(b: Bld) {
     const wasInside = b === this.isInside; if (wasInside) this.exitShelter();
     this.tweens.add({ targets: b.sprite, alpha: 0, scaleX: 0, scaleY: 0, duration: 400, onComplete: () => { b.sprite.destroy(); b.bar.destroy(); b.lbl.destroy(); } });
-    if (b === this.mill) { this.mill = null; this.pileVis(); } if (b === this.qry) { this.qry = null; this.pileVis(); }
+    if (b === this.mill) { this.mill = null; basePlanks = 0; millInputLogs = 0; this.pileVis(); }
+    if (b === this.qry) { this.qry = null; baseBricks = 0; qryInputRubble = 0; this.pileVis(); }
     this.blds = this.blds.filter(x => x !== b);
     this.msg(wasInside ? 'Your shelter was destroyed! ❄️' : `${b.kind} destroyed!`);
   }
@@ -846,18 +1123,23 @@ class Game extends Phaser.Scene {
   private createHUD() {
     this.hudEl = document.createElement('div'); this.hudEl.id = 'game-hud';
     this.hudEl.innerHTML = `
+      <div class="hud-section"><h3>🌡️ Warmth</h3><div id="temp-bar-outer"><div id="temp-bar-inner"></div></div></div>
       <div class="hud-section"><h3>❤️ Health</h3><div id="hp-bar-outer"><div id="hp-bar-inner"></div></div></div>
       <div class="hud-section"><h3>🍖 Hunger</h3><div id="hunger-bar-outer"><div id="hunger-bar-inner"></div></div></div>
       <div class="hud-section"><h3>🎒 Backpack <span id="bp-total">0/${CAP}</span></h3>
-        <div class="bp-row"><span id="bp-w">🪵0</span><button class="drop-btn" id="d-w">➖</button></div>
-        <div class="bp-row"><span id="bp-s">🪨0</span><button class="drop-btn" id="d-s">➖</button></div>
-        <div class="bp-row"><span id="bp-n">❄️0</span><button class="drop-btn" id="d-n">➖</button></div>
-        <div class="bp-row"><span id="bp-b">🫐0</span><button class="drop-btn" id="d-b">➖</button></div>
-        <div class="bp-row"><span id="bp-a">🏹0</span><button class="drop-btn" id="d-a">➖</button></div>
-        <div class="bp-row"><span id="bp-p">🦊0</span><button class="drop-btn" id="d-p">➖</button></div>
-        <div class="bp-row"><span id="bp-m">🥩0</span><button class="drop-btn" id="d-m">➖</button></div></div>
-      <div class="hud-section"><h3>🏗️ Base Storage</h3>
-        <div id="bs-w">🪵0</div><div id="bs-s">🪨0</div></div>`;
+        <div class="bp-row"><span id="bp-w">🪵 Logs: 0</span><button class="drop-btn" id="d-w">➖</button></div>
+        <div class="bp-row"><span id="bp-s">🪨 Rubble: 0</span><button class="drop-btn" id="d-s">➖</button></div>
+        <div class="bp-row"><span id="bp-n">❄️ Snow: 0</span><button class="drop-btn" id="d-n">➖</button></div>
+        <div class="bp-row"><span id="bp-b">🪐 Berries: 0</span><button class="drop-btn" id="d-b">➖</button></div>
+        <div class="bp-row"><span id="bp-a">🏹 Arrows: 0</span><button class="drop-btn" id="d-a">➖</button></div>
+        <div class="bp-row"><span id="bp-p">🦊 Pelts: 0</span><button class="drop-btn" id="d-p">➖</button></div>
+        <div class="bp-row"><span id="bp-m">🥩 Meat: 0</span><button class="drop-btn" id="d-m">➖</button></div></div>
+      <div class="hud-section"><h3>🔥 Furnace</h3>
+        <div id="bs-fl">🪵 Logs: 0/30</div><div id="bs-fr">🪨 Rubble: 0/30</div></div>
+      <div class="hud-section" id="hud-mill" style="display:none"><h3>🪵 Mill</h3>
+        <div id="bs-mp">📦 Planks: 0/100</div><div id="bs-mi">🪵 Queue: 0</div></div>
+      <div class="hud-section" id="hud-qry" style="display:none"><h3>⛏️ Quarry</h3>
+        <div id="bs-qb">🧱 Bricks: 0/100</div><div id="bs-qi">🪨 Queue: 0</div></div>`;
     document.body.appendChild(this.hudEl);
     // pause button
     const pauseBtn = document.createElement('button'); pauseBtn.id = 'pause-btn'; pauseBtn.textContent = '⏸';
@@ -871,20 +1153,24 @@ class Game extends Phaser.Scene {
     window.addEventListener('keydown', (e) => { if (e.key === 'p' || e.key === 'P') this.togglePause(); });
     const btns = document.createElement('div'); btns.id = 'hud-buttons';
     btns.innerHTML = `<h3>🔨 Build</h3>
-      <button id="b-mill">🪵 Lumber Mill<br><small>15 Wood (BP)</small></button>
-      <button id="b-qry">⛏️ Quarry<br><small>15 Stone (BP)</small></button>
-      <button id="b-ig">🏠 Igloo<br><small>10 Snow+5 Wood (BP)</small></button>
-      <button id="b-wh">🏡 Wood House<br><small>60 Wood (Base)</small></button>
-      <button id="b-sh">🏰 Stone House<br><small>100 Stone+40 Wood (Base)</small></button>
-      <button id="b-fence">🪵 Fence<br><small>5 Wood (BP)</small></button>
+      <button id="b-mill">🪵 Lumber Mill<br><small>15 Logs (BP)</small></button>
+      <button id="b-qry">⛏️ Quarry<br><small>15 Rubble (BP)</small></button>
+      <button id="b-ig">🏠 Igloo<br><small>10 Snow+5 Logs (BP)</small></button>
+      <button id="b-wh">🏡 Wood House<br><small>40 Planks (Mill)</small></button>
+      <button id="b-sh">🏰 Stone House<br><small>60 Bricks+20 Planks</small></button>
+      <button id="b-fence">🪵 Fence<br><small>5 Logs (BP)</small></button>
       <hr style="border-color:rgba(255,255,255,.1);margin:6px 0">
       <h3>⚔️ Craft</h3>
-      <button id="c-bow">🏹 Craft Bow<br><small>20 Wood (Base)</small></button>
-      <button id="c-arr">🏹 Craft 5× Arrows<br><small>2 Wood+2 Stone (BP)</small></button>
+      <button id="c-bow">🏹 Craft Bow<br><small>10 Planks (Mill)</small></button>
+      <button id="c-arr">🏹 Craft 5× Arrows<br><small>2 Logs+2 Rubble (BP)</small></button>
       <button id="c-coat">🧥 Fur Coat<br><small>5 Pelts (BP)</small></button>
       <hr style="border-color:rgba(255,255,255,.1);margin:6px 0">
       <button id="b-eat">🫐 Eat Berry [F]<br><small>+20 Hunger</small></button>
-      <button id="b-meat">🥩 Eat Meat [E]<br><small>+50 Hunger</small></button>`;
+      <button id="b-meat">🥩 Eat Meat [E]<br><small>+50 Hunger</small></button>
+      <hr style="border-color:rgba(255,255,255,.1);margin:6px 0">
+      <h3>🔥 Furnace</h3>
+      <button id="b-fup2">⬆️ Upgrade Lvl 2<br><small>30 Planks+30 Bricks</small></button>
+      <button id="b-fup3">⬆️ Upgrade Lvl 3<br><small>60P+60B+10 Pelts</small></button>`;
     document.body.appendChild(btns);
     const timer = document.createElement('div'); timer.id = 'hud-timer'; document.body.appendChild(timer);
     document.getElementById('b-mill')!.onclick = () => this.enterBld('mill', 'lumberMill', 0.18);
@@ -898,9 +1184,11 @@ class Game extends Phaser.Scene {
     document.getElementById('c-coat')!.onclick = () => this.craftCoat();
     document.getElementById('b-eat')!.onclick = () => this.eatBerry();
     document.getElementById('b-meat')!.onclick = () => this.eatMeat();
+    document.getElementById('b-fup2')!.onclick = () => this.upgradeFurnace(2);
+    document.getElementById('b-fup3')!.onclick = () => this.upgradeFurnace(3);
     // drop buttons
-    document.getElementById('d-w')!.onclick = () => this.dropItem('wood');
-    document.getElementById('d-s')!.onclick = () => this.dropItem('stone');
+    document.getElementById('d-w')!.onclick = () => this.dropItem('logs');
+    document.getElementById('d-s')!.onclick = () => this.dropItem('rubble');
     document.getElementById('d-n')!.onclick = () => this.dropItem('snow');
     document.getElementById('d-b')!.onclick = () => this.dropItem('berries');
     document.getElementById('d-a')!.onclick = () => this.dropItem('arrows');
@@ -908,7 +1196,7 @@ class Game extends Phaser.Scene {
     document.getElementById('d-m')!.onclick = () => this.dropItem('meat');
     this.msgEl = document.createElement('div'); this.msgEl.id = 'game-msg'; document.body.appendChild(this.msgEl);
   }
-  private dropItem(key: 'wood' | 'stone' | 'snow' | 'berries' | 'arrows' | 'pelts' | 'meat') {
+  private dropItem(key: 'logs' | 'rubble' | 'snow' | 'berries' | 'arrows' | 'pelts' | 'meat') {
     if (this.bp[key] <= 0) { this.msg(`No ${key} to drop!`); return; }
     this.bp[key]--;
     this.msg(`Dropped 1 ${key}`);
@@ -924,21 +1212,37 @@ class Game extends Phaser.Scene {
     if (hpI) { const p = this.playerHp / this.MAX_HP; hpI.style.width = `${p * 100}%`; hpI.style.background = p > 0.5 ? '#e04050' : p > 0.25 ? '#cc8833' : '#ff2222'; }
     const huI = $('hunger-bar-inner') as HTMLDivElement;
     if (huI) { const p = this.playerHunger / this.MAX_HUNGER; huI.style.width = `${p * 100}%`; huI.style.background = p > 0.5 ? '#dd8822' : p > 0.25 ? '#cc6622' : '#ff3311'; }
-    $('bp-w')!.textContent = `🪵 Wood: ${this.bp.wood}`;
-    $('bp-s')!.textContent = `🪨 Stone: ${this.bp.stone}`;
+    $('bp-w')!.textContent = `🪵 Logs: ${this.bp.logs}`;
+    $('bp-s')!.textContent = `🪨 Rubble: ${this.bp.rubble}`;
     $('bp-n')!.textContent = `❄️ Snow: ${this.bp.snow}`;
-    $('bp-b')!.textContent = `🫐 Berries: ${this.bp.berries}`;
+    $('bp-b')!.textContent = `🪐 Berries: ${this.bp.berries}`;
     $('bp-a')!.textContent = `🏹 Arrows: ${this.bp.arrows}`;
     $('bp-p')!.textContent = `🦊 Pelts: ${this.bp.pelts}`;
     $('bp-m')!.textContent = `🥩 Meat: ${this.bp.meat}`;
     const tot = $('bp-total'); if (tot) tot.textContent = `${this.bpTotal()}/${CAP}`;
-    $('bs-w')!.textContent = `🪵 Wood: ${baseWood}`;
-    $('bs-s')!.textContent = `🪨 Stone: ${baseStone}`;
+    // furnace storage
+    $('bs-fl')!.textContent = `🪵 Logs: ${baseLogs}/${FURNACE_LOG_CAP}`;
+    $('bs-fr')!.textContent = `🪨 Rubble: ${baseRubble}/${FURNACE_RUBBLE_CAP}`;
+    // mill section
+    const hudMill = $('hud-mill'); if (hudMill) hudMill.style.display = this.mill ? '' : 'none';
+    $('bs-mp')!.textContent = `📦 Planks: ${basePlanks}/${MILL_PLANK_CAP}`;
+    $('bs-mi')!.textContent = `🪵 Queue: ${millInputLogs}`;
+    // quarry section
+    const hudQry = $('hud-qry'); if (hudQry) hudQry.style.display = this.qry ? '' : 'none';
+    $('bs-qb')!.textContent = `🧱 Bricks: ${baseBricks}/${QRY_BRICK_CAP}`;
+    $('bs-qi')!.textContent = `🪨 Queue: ${qryInputRubble}`;
+    // craft buttons
     const bowBtn = $('c-bow'); if (bowBtn) (bowBtn as HTMLButtonElement).style.display = hasBow ? 'none' : '';
     const coatBtn = $('c-coat'); if (coatBtn) (coatBtn as HTMLButtonElement).style.display = hasCoat ? 'none' : '';
     const t = $('hud-timer')!;
     if (this.sOn) { const l = Math.ceil((STORM_LEN - this.sElap) / 1000); t.textContent = `❄️ Blizzard: ${l}s`; t.style.color = '#ff6666'; }
     else { t.textContent = ''; }
+    // warmth bar
+    const tmpI = $('temp-bar-inner') as HTMLDivElement;
+    if (tmpI) { const p = this.playerTemp / this.MAX_TEMP; tmpI.style.width = `${p * 100}%`; tmpI.style.background = p > 0.5 ? '#44aadd' : p > 0.25 ? '#6688cc' : '#8866aa'; }
+    // furnace upgrade buttons
+    const fu2 = $('b-fup2'); if (fu2) (fu2 as HTMLButtonElement).style.display = this.furnaceLvl >= 2 ? 'none' : '';
+    const fu3 = $('b-fup3'); if (fu3) (fu3 as HTMLButtonElement).style.display = this.furnaceLvl >= 3 ? 'none' : (this.furnaceLvl < 2 ? 'none' : '');
   }
   private msg(t: string) {
     this.msgEl.textContent = t; this.msgEl.style.opacity = '1';
@@ -971,7 +1275,10 @@ class Game extends Phaser.Scene {
       el.style.opacity = '0'; setTimeout(() => el.remove(), 600);
       this.p.setPosition(MW / 2, MH / 2 + 120);
       this.playerHp = this.MAX_HP; this.playerHunger = this.MAX_HUNGER; this.hungerClock = 0;
-      this.bp = { wood: 0, stone: 0, snow: 0, berries: 0, arrows: 0, pelts: 0, meat: 0 };
+      this.playerTemp = this.MAX_TEMP;
+      this.bp = { logs: 0, rubble: 0, snow: 0, berries: 0, arrows: 0, pelts: 0, meat: 0 };
+      baseLogs = 0; baseRubble = 0; basePlanks = 0; baseBricks = 0;
+      millInputLogs = 0; qryInputRubble = 0; furnaceLit = true; furnaceEverFueled = false;
       this.scene.resume();
       this.msg('Respawned at base.');
     };
@@ -983,7 +1290,7 @@ new Phaser.Game({
   type: Phaser.WEBGL,
   width: window.innerWidth,
   height: window.innerHeight,
-  backgroundColor: '#eef7fa',
+  backgroundColor: '#f0f4f8',
   parent: 'app',
   physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
   scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
