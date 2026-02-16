@@ -8,10 +8,11 @@ let basePlanks = 0, baseBricks = 0;
 let millInputLogs = 0, qryInputRubble = 0;
 let furnaceLit = true;
 let furnaceEverFueled = false;
-let hasBow = false, hasCoat = false;
+let hasBow = false, hasCoat = false, hasBag = false;
 const sfx = new SFX();
 
-const MW = 2400, MH = 2400, CAP = 20, SPEED = 220, RANGE = 130, PSC = 0.09;
+const MW = 2400, MH = 2400, SPEED = 220, RANGE = 130, PSC = 0.09;
+let CAP = 20;
 const STORM_LEN = 15_000, STORM_TICK = 5_000;
 const DAY_LEN = 60_000, NIGHT_LEN = 60_000, FULL_DAY = DAY_LEN + NIGHT_LEN;
 const HUNGER_TICK = 2_000, BUSH_REGROW = 30_000, TREE_REGROW = 60_000, STONE_REGROW = 120_000;
@@ -30,12 +31,13 @@ interface Bush { sprite: Phaser.GameObjects.Sprite; ready: boolean; timer: numbe
 interface Wolf { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body; angle: number; cd: number; hp: number; stunTimer: number; attackTarget: Bld | null; attackCd: number }
 interface Arrow { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body; vx: number; vy: number; life: number }
 interface Trap { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body }
+interface Deer { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body; angle: number; stunTimer: number }
 
 interface GameState {
   player: { x: number; y: number; hp: number; hunger: number; temp: number };
   bp: { logs: number; rubble: number; snow: number; berries: number; arrows: number; pelts: number; meat: number };
   base: { baseLogs: number; baseRubble: number; basePlanks: number; baseBricks: number; millInputLogs: number; qryInputRubble: number };
-  progression: { hasBow: boolean; hasCoat: boolean; furnaceLvl: number; furnaceEverFueled: boolean; furnaceLit: boolean };
+  progression: { hasBow: boolean; hasCoat: boolean; hasBag: boolean; furnaceLvl: number; furnaceEverFueled: boolean; furnaceLit: boolean };
   dayClock: number;
   buildings: { x: number; y: number; kind: string; hp: number; tex?: string }[];
 }
@@ -96,7 +98,9 @@ class Game extends Phaser.Scene {
   private wolves: Wolf[] = [];
   private projectiles: Arrow[] = [];
   private traps: Trap[] = [];
+  private deers: Deer[] = [];
   private groundItems: Phaser.GameObjects.Sprite[] = [];
+  private healTimer = 0;
 
   // combat
   private shootSlow = 0;
@@ -155,6 +159,7 @@ class Game extends Phaser.Scene {
     this.load.image('bushHarvested', '/bush_harvested.png');
     this.load.image('wolfDay', '/wolf_day.png');
     this.load.image('wolfNight', '/wolf_night.png');
+    this.load.image('deer', '/deer.png');
     this.load.image('player', '/player.png');
     // action sprites
     this.load.image('playerIdle', '/player.png');
@@ -208,6 +213,7 @@ class Game extends Phaser.Scene {
     this.furnace = this.addBld(MW / 2, MH / 2 - 80, 'baseFurnace', 'furnace', 999, 999, 0.22);
     this.scatter();
     this.spawnWolves();
+    this.spawnDeer();
 
     // input
     const kb = this.input.keyboard!;
@@ -304,6 +310,7 @@ class Game extends Phaser.Scene {
     for (const b of this.blds) { b.sprite.setDepth(b.sprite.y); b.bar.setDepth(b.sprite.y + 1); b.lbl.setDepth(b.sprite.y + 1); }
     for (const bu of this.bushes) bu.sprite.setDepth(bu.sprite.y);
     for (const w of this.wolves) w.sprite.setDepth(w.sprite.y);
+    for (const de of this.deers) de.sprite.setDepth(de.sprite.y);
 
     if (this.bMode && this.bPrev) {
       const ptr = this.input.activePointer;
@@ -326,7 +333,13 @@ class Game extends Phaser.Scene {
     this.tickRefinement(dt);
     this.tickFuel(dt);
     this.tickWolves(dt);
+    this.tickDeers(dt);
     this.tickProjectiles(dt);
+    // HP regen: if well-fed and warm
+    if (this.playerHunger > 80 && this.playerTemp > 80) {
+      this.healTimer += dt;
+      if (this.healTimer >= 1000) { this.healTimer = 0; this.playerHp = Math.min(this.playerHp + 1, this.MAX_HP); }
+    } else { this.healTimer = 0; }
     this.refreshHUD();
   }
 
@@ -472,6 +485,83 @@ class Game extends Phaser.Scene {
     this.wolves.push({ sprite, body, angle: Math.random() * Math.PI * 2, cd: 0, hp: WOLF_HP, stunTimer: 0, attackTarget: null, attackCd: 0 });
   }
 
+  /* ─── deer ─── */
+  private spawnDeer() {
+    const cx = MW / 2, cy = MH / 2;
+    const n = Phaser.Math.Between(4, 5);
+    for (let i = 0; i < n; i++) this.spawnOneDeer(cx, cy, 600);
+  }
+  private spawnOneDeer(avoidX: number, avoidY: number, minDist: number) {
+    let x: number, y: number;
+    do { x = Phaser.Math.Between(100, MW - 100); y = Phaser.Math.Between(100, MH - 100); }
+    while (Phaser.Math.Distance.Between(x, y, avoidX, avoidY) < minDist);
+    const sprite = this.lit(this.add.sprite(x, y, 'deer').setScale(0.12));
+    this.physics.add.existing(sprite);
+    const body = sprite.body as Phaser.Physics.Arcade.Body;
+    body.setCollideWorldBounds(true);
+    this.deers.push({ sprite, body, angle: Math.random() * Math.PI * 2, stunTimer: 0 });
+  }
+  private tickDeers(dt: number) {
+    const px = this.p.x, py = this.p.y;
+    for (const d of this.deers) {
+      if (!d.sprite.active) continue;
+      // stun handling
+      if (d.stunTimer > 0) {
+        d.stunTimer -= dt;
+        d.body.setVelocity(0, 0);
+        d.sprite.setTint(0xffff44);
+        if (d.stunTimer <= 0) { d.stunTimer = 0; d.sprite.clearTint(); }
+        continue;
+      }
+      // find nearest threat (player or wolf)
+      let threatX = px, threatY = py;
+      let threatDist = Phaser.Math.Distance.Between(d.sprite.x, d.sprite.y, px, py);
+      for (const w of this.wolves) {
+        const wd = Phaser.Math.Distance.Between(d.sprite.x, d.sprite.y, w.sprite.x, w.sprite.y);
+        if (wd < threatDist) { threatDist = wd; threatX = w.sprite.x; threatY = w.sprite.y; }
+      }
+      if (threatDist < 400) {
+        // flee away from threat
+        const fleeAngle = Math.atan2(d.sprite.y - threatY, d.sprite.x - threatX);
+        d.angle = fleeAngle;
+        const spd = SPEED * 0.9;
+        d.body.setVelocity(Math.cos(fleeAngle) * spd, Math.sin(fleeAngle) * spd);
+        d.sprite.setFlipX(d.body.velocity.x < 0);
+      } else {
+        // wander slowly
+        if (Math.random() < 0.01) d.angle = Math.random() * Math.PI * 2;
+        const wSpd = 30;
+        d.body.setVelocity(Math.cos(d.angle) * wSpd, Math.sin(d.angle) * wSpd);
+        d.sprite.setFlipX(d.body.velocity.x < 0);
+      }
+      // bounce off world edges
+      if (d.sprite.x < 80 || d.sprite.x > MW - 80) d.angle = Math.PI - d.angle;
+      if (d.sprite.y < 80 || d.sprite.y > MH - 80) d.angle = -d.angle;
+      // trap collision
+      for (let i = this.traps.length - 1; i >= 0; i--) {
+        const tr = this.traps[i];
+        if (Phaser.Math.Distance.Between(d.sprite.x, d.sprite.y, tr.sprite.x, tr.sprite.y) < 25) {
+          d.stunTimer = 4000; d.body.setVelocity(0, 0);
+          tr.sprite.destroy(); this.traps.splice(i, 1);
+          this.msg('🪤 Deer trapped!'); break;
+        }
+      }
+    }
+  }
+  private killDeer(d: Deer) {
+    const dx = d.sprite.x, dy = d.sprite.y;
+    if (this.bpTotal() < CAP) this.bp.meat += Math.min(2, CAP - this.bpTotal());
+    if (this.bpTotal() < CAP) this.bp.pelts++;
+    const lt = this.add.text(dx, dy - 20, '+2 🥩 Meat  +1 🦊 Pelt', {
+      fontSize: '13px', color: '#ffe', fontFamily: 'Arial', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5).setDepth(9999);
+    this.tweens.add({ targets: lt, y: dy - 80, alpha: 0, duration: 2000, onComplete: () => lt.destroy() });
+    this.emitParticles(dx, dy, 'partBlood');
+    d.sprite.destroy();
+    this.deers = this.deers.filter(x => x !== d);
+    sfx.hit();
+  }
+
   /* ─── day/night ─── */
   private tickDayNight(dt: number) {
     this.dayClock += dt;
@@ -480,6 +570,10 @@ class Game extends Phaser.Scene {
       if (this.wolves.length < WOLF_MAX_MAP) {
         this.spawnOneWolf(this.p.x, this.p.y, 600);
       }
+    }
+    // respawn deer if low
+    if (this.deers.length < 4) {
+      this.spawnOneDeer(this.p.x, this.p.y, 400);
     }
     const wasNight = this.isNight;
     this.isNight = this.dayClock >= DAY_LEN;
@@ -501,6 +595,13 @@ class Game extends Phaser.Scene {
     if (this.building && this.building.paused) {
       const d = Phaser.Math.Distance.Between(px, py, this.building.wx, this.building.wy);
       if (d < 100) { this.resumeBuild(); return; }
+    }
+
+    // harvest stunned deer (melee)
+    for (const deer of this.deers) {
+      if (!deer.sprite.active) continue;
+      const dd = Phaser.Math.Distance.Between(px, py, deer.sprite.x, deer.sprite.y);
+      if (dd < RANGE && deer.stunTimer > 0) { this.killDeer(deer); return; }
     }
 
     // pick up ground items (bow)
@@ -737,6 +838,18 @@ class Game extends Phaser.Scene {
           break;
         }
       }
+      // deer arrow hit
+      if (!rem.includes(a)) {
+        for (const deer of this.deers) {
+          if (!deer.sprite.active) continue;
+          const dd = Phaser.Math.Distance.Between(a.sprite.x, a.sprite.y, deer.sprite.x, deer.sprite.y);
+          if (dd < 30) {
+            rem.push(a);
+            this.killDeer(deer);
+            break;
+          }
+        }
+      }
     }
     for (const a of rem) {
       a.sprite.destroy();
@@ -747,9 +860,9 @@ class Game extends Phaser.Scene {
   /* ─── combat: snare trap ─── */
   private placeTrap() {
     if (this.isInside) { this.msg("Can't place traps inside!"); return; }
-    if (basePlanks < 5) { this.msg('Need 5 Planks (Mill)'); return; }
-    if (this.totalRubble() < 5) { this.msg('Need 5 Rubble'); return; }
-    basePlanks -= 5; this.spendRubble(5);
+    if (this.bp.logs < 2) { this.msg('Need 2 Logs (BP)'); return; }
+    if (this.bp.meat < 1) { this.msg('Need 1 Meat (BP)'); return; }
+    this.bp.logs -= 2; this.bp.meat -= 1;
     const sprite = this.add.sprite(this.p.x, this.p.y, 'snareTrap').setScale(0.12).setDepth(1);
     this.physics.add.existing(sprite, true);
     this.traps.push({ sprite, body: sprite.body as Phaser.Physics.Arcade.Body });
@@ -894,6 +1007,14 @@ class Game extends Phaser.Scene {
     if (this.bp.pelts < 5) { this.msg('Need 5 pelts (BP)'); return; }
     this.bp.pelts -= 5; hasCoat = true;
     sfx.build(); this.msg('🧥 Fur Coat crafted! Blizzard damage reduced.');
+  }
+  private craftBag() {
+    if (hasBag) { this.msg('Already have a leather bag!'); return; }
+    if (this.bp.pelts < 10) { this.msg('Need 10 Pelts (BP)'); return; }
+    if (basePlanks < 10) { this.msg('Need 10 Planks (Mill)'); return; }
+    this.bp.pelts -= 10; basePlanks -= 10;
+    hasBag = true; CAP = 35;
+    sfx.build(); this.msg('🎒 Leather Bag crafted! Backpack: 35 slots.');
   }
   private upgradeFurnace(level: number) {
     if (this.furnaceLvl >= level) { this.msg('Already upgraded!'); return; }
@@ -1217,6 +1338,9 @@ class Game extends Phaser.Scene {
       <button id="c-bow">🏹 Craft Bow<br><small>10 Planks (Mill)</small></button>
       <button id="c-arr">🏹 Craft 5× Arrows<br><small>2 Logs+2 Rubble (BP)</small></button>
       <button id="c-coat">🧥 Fur Coat<br><small>5 Pelts (BP)</small></button>
+      <button id="c-bag">🎒 Leather Bag<br><small>10 Pelts+10 Planks</small></button>
+      <hr style="border-color:rgba(255,255,255,.1);margin:6px 0">
+      <button id="b-trap">🪤 Snare Trap [T]<br><small>2 Logs+1 Meat (BP)</small></button>
       <hr style="border-color:rgba(255,255,255,.1);margin:6px 0">
       <button id="b-eat">🫐 Eat Berry [F]<br><small>+20 Hunger</small></button>
       <button id="b-meat">🥩 Eat Meat [E]<br><small>+50 Hunger</small></button>
@@ -1238,6 +1362,8 @@ class Game extends Phaser.Scene {
     document.getElementById('c-bow')!.onclick = () => this.craftBow();
     document.getElementById('c-arr')!.onclick = () => this.craftArrows();
     document.getElementById('c-coat')!.onclick = () => this.craftCoat();
+    document.getElementById('c-bag')!.onclick = () => this.craftBag();
+    document.getElementById('b-trap')!.onclick = () => this.placeTrap();
     document.getElementById('b-eat')!.onclick = () => this.eatBerry();
     document.getElementById('b-meat')!.onclick = () => this.eatMeat();
     document.getElementById('b-fup2')!.onclick = () => this.upgradeFurnace(2);
@@ -1369,6 +1495,7 @@ class Game extends Phaser.Scene {
     // craft buttons
     const bowBtn = $('c-bow'); if (bowBtn) (bowBtn as HTMLButtonElement).style.display = hasBow ? 'none' : '';
     const coatBtn = $('c-coat'); if (coatBtn) (coatBtn as HTMLButtonElement).style.display = hasCoat ? 'none' : '';
+    const bagBtn = $('c-bag'); if (bagBtn) (bagBtn as HTMLButtonElement).style.display = hasBag ? 'none' : '';
     const t = $('hud-timer')!;
     if (this.sOn) { const l = Math.ceil((STORM_LEN - this.sElap) / 1000); t.textContent = `❄️ Blizzard: ${l}s`; t.style.color = '#ff6666'; }
     else { t.textContent = ''; }
@@ -1427,7 +1554,7 @@ class Game extends Phaser.Scene {
       player: { x: this.p.x, y: this.p.y, hp: this.playerHp, hunger: this.playerHunger, temp: this.playerTemp },
       bp: { ...this.bp },
       base: { baseLogs, baseRubble, basePlanks, baseBricks, millInputLogs, qryInputRubble },
-      progression: { hasBow, hasCoat, furnaceLvl: this.furnaceLvl, furnaceEverFueled, furnaceLit },
+      progression: { hasBow, hasCoat, hasBag, furnaceLvl: this.furnaceLvl, furnaceEverFueled, furnaceLit },
       dayClock: this.dayClock,
       buildings
     };
@@ -1461,6 +1588,8 @@ class Game extends Phaser.Scene {
     // progression
     hasBow = state.progression.hasBow;
     hasCoat = state.progression.hasCoat;
+    hasBag = state.progression.hasBag ?? false;
+    if (hasBag) CAP = 35; else CAP = 20;
     this.furnaceLvl = state.progression.furnaceLvl;
     furnaceEverFueled = state.progression.furnaceEverFueled;
     furnaceLit = state.progression.furnaceLit;
@@ -1515,7 +1644,7 @@ class Game extends Phaser.Scene {
     baseLogs = 0; baseRubble = 0; basePlanks = 0; baseBricks = 0;
     millInputLogs = 0; qryInputRubble = 0;
     furnaceLit = true; furnaceEverFueled = false;
-    hasBow = false; hasCoat = false;
+    hasBow = false; hasCoat = false; hasBag = false; CAP = 20;
 
     // reset player
     this.p.setPosition(MW / 2, MH / 2 + 120);
@@ -1523,6 +1652,7 @@ class Game extends Phaser.Scene {
     this.playerHp = this.MAX_HP;
     this.playerHunger = this.MAX_HUNGER;
     this.hungerClock = 0;
+    this.healTimer = 0;
     this.playerTemp = this.MAX_TEMP;
     this.bp = { logs: 0, rubble: 0, snow: 0, berries: 0, arrows: 0, pelts: 0, meat: 0 };
     this.dayClock = 0;
@@ -1536,6 +1666,10 @@ class Game extends Phaser.Scene {
     }
     this.blds = this.blds.filter(b => b.kind === 'furnace');
     this.mill = null; this.qry = null;
+
+    // destroy deer
+    for (const d of this.deers) d.sprite.destroy();
+    this.deers = [];
 
     // furnace visuals
     if (this.furnace) {
