@@ -405,10 +405,10 @@ class Game extends Phaser.Scene {
     }
 
     // layer 4 – faint wind streaks
-    g.lineStyle(1, 0xcddceb, 0.08);
-    for (let i = 0; i < 60; i++) {
+    g.lineStyle(1, 0xcddceb, 0.04);
+    for (let i = 0; i < 40; i++) {
       const sx = rng(0, MW), sy = rng(0, MH);
-      g.lineBetween(sx, sy, sx + rng(40, 150), sy + rng(-5, 5));
+      g.lineBetween(sx, sy, sx + rng(20, 80), sy + rng(-3, 3));
     }
   }
 
