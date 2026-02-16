@@ -404,3 +404,164 @@ body {
   background: rgba(60, 190, 120, 0.6) !important;
   transform: scale(1.05);
 }
+
+/* ── Virtual Touch Controls ── */
+#touch-dpad,
+#touch-actions {
+  display: none;
+  /* hidden on desktop by default */
+}
+
+#touch-dpad {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 9500;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.dpad-row {
+  display: flex;
+  gap: 4px;
+}
+
+.dpad-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(10, 30, 60, 0.5);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(150, 210, 255, 0.25);
+  color: #d0e8ff;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.dpad-btn:active {
+  background: rgba(80, 160, 255, 0.55);
+  transform: scale(0.92);
+}
+
+#touch-actions {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9500;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.touch-btn {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: rgba(10, 30, 60, 0.5);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(150, 210, 255, 0.25);
+  color: #d0e8ff;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.touch-btn:active {
+  background: rgba(80, 160, 255, 0.55);
+  transform: scale(0.92);
+}
+
+#touch-action {
+  width: 72px;
+  height: 72px;
+  font-size: 28px;
+  background: rgba(20, 80, 140, 0.5);
+  border-color: rgba(100, 180, 255, 0.35);
+}
+
+/* ── Responsive: Mobile ── */
+@media (max-width: 768px) {
+
+  #touch-dpad,
+  #touch-actions {
+    display: flex;
+  }
+
+  #game-hud {
+    top: 6px;
+    left: 6px;
+  }
+
+  #game-hud .hud-section {
+    padding: 6px 10px;
+    min-width: 130px;
+    font-size: 11px;
+  }
+
+  #game-hud h3 {
+    font-size: 11px;
+    margin: 2px 0;
+  }
+
+  #hud-buttons {
+    width: 130px;
+    font-size: 10px;
+    padding: 6px;
+    max-height: 50vh;
+  }
+
+  #hud-buttons h3 {
+    font-size: 11px;
+  }
+
+  #hud-buttons button {
+    padding: 5px 6px;
+    font-size: 10px;
+  }
+
+  #pause-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+    top: 6px;
+    right: 6px;
+  }
+
+  #hud-timer {
+    font-size: 12px;
+    top: 6px;
+  }
+
+  .pause-logo {
+    max-width: min(280px, 60vw);
+  }
+
+  .drop-btn {
+    min-width: 32px;
+    min-height: 32px;
+    font-size: 16px;
+    padding: 4px 8px;
+  }
+}
+
+/* Cancel button distinct styling */
+#touch-cancel {
+  background: rgba(180, 30, 30, 0.5);
+  border-color: rgba(255, 100, 100, 0.35);
+}

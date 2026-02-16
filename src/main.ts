@@ -59,6 +59,10 @@ class Game extends Phaser.Scene {
   private bMode: string | null = null;
   private bPrev: Phaser.GameObjects.Sprite | null = null;
   private buildDir: 'East' | 'West' = 'East';
+  // touch controls
+  private touchVx = 0;
+  private touchVy = 0;
+  private touchAction = false;
   private gcd = 0;
   private playerHp = 100;
   private readonly MAX_HP = 100;
@@ -186,6 +190,7 @@ class Game extends Phaser.Scene {
 
     this.input.once('pointerdown', () => sfx.init());
     this.input.keyboard!.once('keydown', () => sfx.init());
+    this.input.addPointer(2); // enable multi-touch
 
     this.genTex();
 
@@ -257,10 +262,10 @@ class Game extends Phaser.Scene {
       if (this.waddle) { this.waddle.stop(); this.waddle = null; this.p.setScale(PSC); }
     } else if (!this.isInside) {
       let vx = 0, vy = 0;
-      if (this.k.A.isDown || this.cursors.left.isDown) vx = -1;
-      else if (this.k.D.isDown || this.cursors.right.isDown) vx = 1;
-      if (this.k.W.isDown || this.cursors.up.isDown) vy = -1;
-      else if (this.k.S.isDown || this.cursors.down.isDown) vy = 1;
+      if (this.k.A.isDown || this.cursors.left.isDown || this.touchVx < 0) vx = -1;
+      else if (this.k.D.isDown || this.cursors.right.isDown || this.touchVx > 0) vx = 1;
+      if (this.k.W.isDown || this.cursors.up.isDown || this.touchVy < 0) vy = -1;
+      else if (this.k.S.isDown || this.cursors.down.isDown || this.touchVy > 0) vy = 1;
       const len = Math.sqrt(vx * vx + vy * vy) || 1;
       this.pb.setVelocity(vx / len * SPEED * spdMul, vy / len * SPEED * spdMul);
       const moving = vx !== 0 || vy !== 0;
@@ -284,7 +289,9 @@ class Game extends Phaser.Scene {
       if (this.waddle) { this.waddle.stop(); this.waddle = null; this.p.setScale(PSC); }
     }
 
-    if (!isBusy && this.k.SP.isDown) { this.gcd -= dt; if (this.gcd <= 0) { this.interact(); this.gcd = 400; } } else if (!isBusy) this.gcd = 0;
+    const actionHeld = !isBusy && (this.k.SP.isDown || this.touchAction);
+    if (actionHeld) { this.gcd -= dt; if (this.gcd <= 0) { this.interact(); this.gcd = 400; } }
+    else if (!isBusy) { this.gcd = Math.max(0, this.gcd - dt); }
 
     this.pLight.setPosition(this.p.x, this.p.y - 10);
     this.ambCurrent = Phaser.Math.Linear(this.ambCurrent, this.ambTarget, 0.0008 * dt);
@@ -930,9 +937,20 @@ class Game extends Phaser.Scene {
     const actualTex = isWallGate ? tex + this.buildDir : tex;
     this.bPrev = this.lit(this.add.sprite(0, 0, actualTex).setScale(sc).setAlpha(0.5)).setDepth(8000);
     if (isWallGate) this.bPrev.setOrigin(0.5, 1);
+    // show/hide rotate + cancel buttons for mobile
+    const rotBtn = document.getElementById('touch-rotate');
+    const cancelBtn = document.getElementById('touch-cancel');
+    if (rotBtn) rotBtn.style.display = isWallGate ? 'flex' : 'none';
+    if (cancelBtn) cancelBtn.style.display = 'flex';
     this.msg(isWallGate ? 'Click to place. R=rotate, ESC=cancel.' : 'Click to place. ESC to cancel.');
   }
-  private cancelBld() { if (this.bPrev) this.bPrev.destroy(); this.bPrev = null; this.bMode = null; }
+  private cancelBld() {
+    if (this.bPrev) this.bPrev.destroy(); this.bPrev = null; this.bMode = null;
+    const rotBtn = document.getElementById('touch-rotate');
+    const cancelBtn = document.getElementById('touch-cancel');
+    if (rotBtn) rotBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+  }
   private placeBld(wx: number, wy: number) {
     const m = this.bMode!; this.cancelBld();
     // build durations in ms
@@ -972,15 +990,9 @@ class Game extends Phaser.Scene {
         const bld = this.addBld(wx, wy, tex, m, this.getBldHp(m), this.getBldHp(m), 0.12);
         bld.sprite.setOrigin(0.5, 1);
         this.physics.add.existing(bld.sprite, true);
-        // thin collision body matching the wall orientation
         const body = bld.sprite.body as Phaser.Physics.Arcade.StaticBody;
-        if (this.buildDir === 'East') {
-          body.setSize(bld.sprite.displayWidth * 0.8, bld.sprite.displayHeight * 0.3);
-          body.setOffset(bld.sprite.displayWidth * 0.1, bld.sprite.displayHeight * 0.6);
-        } else {
-          body.setSize(bld.sprite.displayWidth * 0.8, bld.sprite.displayHeight * 0.3);
-          body.setOffset(bld.sprite.displayWidth * 0.1, bld.sprite.displayHeight * 0.6);
-        }
+        body.setSize(bld.sprite.displayWidth * 0.8, bld.sprite.displayHeight * 0.3);
+        body.setOffset(bld.sprite.displayWidth * 0.1, bld.sprite.displayHeight * 0.6);
         for (const w of this.wolves) this.physics.add.collider(w.sprite, bld.sprite);
         this.physics.add.collider(this.p, bld.sprite);
         sfx.build(); this.msg(`${m.includes('Wall') ? 'Wall' : 'Gate'} placed!`); this.pileVis(); break;
@@ -1244,6 +1256,80 @@ class Game extends Phaser.Scene {
     this.saveBtnEl.textContent = '💾 Save Game'; this.saveBtnEl.style.display = 'none';
     btns.appendChild(this.saveBtnEl);
     this.saveBtnEl.onclick = () => this.saveGame();
+
+    // ── Virtual Touch Controls ──
+    // D-Pad (bottom-left)
+    const dpad = document.createElement('div');
+    dpad.id = 'touch-dpad';
+    dpad.innerHTML = `
+      <button class="dpad-btn" id="dpad-up">▲</button>
+      <div class="dpad-row">
+        <button class="dpad-btn" id="dpad-left">◄</button>
+        <button class="dpad-btn" id="dpad-right">►</button>
+      </div>
+      <button class="dpad-btn" id="dpad-down">▼</button>`;
+    document.body.appendChild(dpad);
+
+    // Action buttons (bottom-right)
+    const touchBtns = document.createElement('div');
+    touchBtns.id = 'touch-actions';
+    touchBtns.innerHTML = `
+      <button class="touch-btn" id="touch-action">⛏️</button>
+      <button class="touch-btn" id="touch-trap">🪤</button>
+      <button class="touch-btn" id="touch-rotate" style="display:none">🔄</button>
+      <button class="touch-btn" id="touch-cancel" style="display:none">✖️</button>`;
+    document.body.appendChild(touchBtns);
+
+    // D-pad event wiring
+    const bindDir = (id: string, vxVal: number, vyVal: number) => {
+      const el = document.getElementById(id)!;
+      const start = () => { this.touchVx = vxVal; this.touchVy = vyVal; };
+      const end = () => { if (this.touchVx === vxVal) this.touchVx = 0; if (this.touchVy === vyVal) this.touchVy = 0; };
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); start(); }, { passive: false });
+      el.addEventListener('touchend', (e) => { e.stopPropagation(); end(); });
+      el.addEventListener('touchcancel', end);
+      el.addEventListener('mousedown', (e) => { e.stopPropagation(); start(); });
+      el.addEventListener('mouseup', end);
+      el.addEventListener('mouseleave', end);
+    };
+    bindDir('dpad-up', 0, -1);
+    bindDir('dpad-down', 0, 1);
+    bindDir('dpad-left', -1, 0);
+    bindDir('dpad-right', 1, 0);
+
+    // Action button
+    const actEl = document.getElementById('touch-action')!;
+    actEl.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); this.touchAction = true; }, { passive: false });
+    actEl.addEventListener('touchend', (e) => { e.stopPropagation(); this.touchAction = false; });
+    actEl.addEventListener('touchcancel', () => { this.touchAction = false; });
+    actEl.addEventListener('mousedown', (e) => { e.stopPropagation(); this.touchAction = true; });
+    actEl.addEventListener('mouseup', () => { this.touchAction = false; });
+    actEl.addEventListener('mouseleave', () => { this.touchAction = false; });
+
+    // Trap button
+    const trapEl = document.getElementById('touch-trap')!;
+    trapEl.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); this.placeTrap(); }, { passive: false });
+    trapEl.addEventListener('mousedown', (e) => { e.stopPropagation(); this.placeTrap(); });
+
+    // Rotate button
+    const rotEl = document.getElementById('touch-rotate')!;
+    const doRotate = () => {
+      if (!this.bMode) return;
+      this.buildDir = this.buildDir === 'East' ? 'West' : 'East';
+      if (this.bPrev) this.bPrev.setTexture(this.bMode + this.buildDir);
+      this.msg(`🔄 Direction: ${this.buildDir}`);
+    };
+    rotEl.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); doRotate(); }, { passive: false });
+    rotEl.addEventListener('mousedown', (e) => { e.stopPropagation(); doRotate(); });
+
+    // Cancel button
+    const cancelEl = document.getElementById('touch-cancel')!;
+    cancelEl.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); this.cancelBld(); }, { passive: false });
+    cancelEl.addEventListener('mousedown', (e) => { e.stopPropagation(); this.cancelBld(); });
+
+    // Stop propagation on dpad/action containers so canvas doesn't get touch events
+    dpad.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: false });
+    touchBtns.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: false });
   }
   private dropItem(key: 'logs' | 'rubble' | 'snow' | 'berries' | 'arrows' | 'pelts' | 'meat') {
     if (this.bp[key] <= 0) { this.msg(`No ${key} to drop!`); return; }
