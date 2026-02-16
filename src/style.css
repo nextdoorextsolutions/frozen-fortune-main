@@ -110,3 +110,55 @@ body {
   pointer-events: none;
   white-space: nowrap;
 }
+
+#hp-bar-outer {
+  width: 100%;
+  height: 12px;
+  background: rgba(0, 0, 0, .5);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+#hp-bar-inner {
+  width: 100%;
+  height: 100%;
+  background: #e04050;
+  border-radius: 6px;
+  transition: width .3s ease, background .3s ease;
+}
+
+#hunger-bar-outer {
+  width: 100%;
+  height: 12px;
+  background: rgba(0, 0, 0, .5);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+#hunger-bar-inner {
+  width: 100%;
+  height: 100%;
+  background: #dd8822;
+  border-radius: 6px;
+  transition: width .3s ease, background .3s ease;
+}
+
+#game-over {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: rgba(5, 10, 30, .8);
+  color: #ff4455;
+  font-family: 'Arial Black', Arial, sans-serif;
+  font-size: 48px;
+  text-shadow: 0 0 30px rgba(255, 50, 50, .6);
+  opacity: 0;
+  transition: opacity .5s ease;
+  pointer-events: none;
+}
