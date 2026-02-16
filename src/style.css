@@ -252,3 +252,155 @@ body {
   color: #8caabb;
   font-family: 'Segoe UI', Arial, sans-serif;
 }
+
+.pause-logo {
+  max-width: min(400px, 70vw);
+  max-height: 40vh;
+  object-fit: contain;
+  margin-bottom: 20px;
+}
+
+/* ── Main Menu ── */
+#main-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  overflow: hidden;
+  padding-bottom: 14vh;
+}
+
+#menu-logo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: 0;
+}
+
+#main-menu::after {
+  display: none;
+}
+
+#menu-gear {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 3;
+  background: rgba(10, 30, 60, 0.4);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(150, 210, 255, 0.2);
+  border-radius: 50%;
+  width: 46px;
+  height: 46px;
+  font-size: 22px;
+  cursor: pointer;
+  color: #cce;
+  transition: background 0.2s, transform 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#menu-gear:hover {
+  background: rgba(50, 120, 200, 0.5);
+  transform: scale(1.1) rotate(30deg);
+}
+
+#menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  z-index: 2;
+  position: relative;
+}
+
+.menu-btn {
+  background: rgba(10, 30, 60, 0.45);
+  backdrop-filter: blur(8px);
+  color: #dceeff;
+  border: 1px solid rgba(150, 210, 255, 0.2);
+  border-radius: 10px;
+  padding: 13px 0;
+  font-size: 17px;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  width: 240px;
+  text-align: center;
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+  letter-spacing: 1px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.menu-btn:hover:not(:disabled) {
+  background: rgba(50, 130, 210, 0.6);
+  transform: scale(1.04);
+  box-shadow: 0 0 18px rgba(80, 180, 255, 0.25);
+}
+
+.menu-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* ── Settings Panel ── */
+#settings-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  background: rgba(10, 30, 55, 0.7);
+  padding: 28px 36px;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 200, 240, 0.15);
+  min-width: 260px;
+  z-index: 2;
+  position: relative;
+}
+
+#settings-panel h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #7ec8e3;
+  letter-spacing: 1px;
+}
+
+#settings-panel label {
+  font-size: 15px;
+  color: #aaccdd;
+  font-weight: 600;
+}
+
+#vol-slider {
+  width: 200px;
+  accent-color: #4ab8e8;
+  cursor: pointer;
+}
+
+#vol-value {
+  font-size: 14px;
+  color: #88bbdd;
+  min-width: 40px;
+  text-align: center;
+}
+
+/* ── Save Button ── */
+#btn-save {
+  background: rgba(50, 160, 100, 0.4) !important;
+  color: #c8ffd8 !important;
+  border: 1px solid rgba(100, 220, 160, 0.3) !important;
+  font-size: 13px !important;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+#btn-save:hover {
+  background: rgba(60, 190, 120, 0.6) !important;
+  transform: scale(1.05);
+}

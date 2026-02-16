@@ -31,6 +31,15 @@ interface Wolf { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.
 interface Arrow { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body; vx: number; vy: number; life: number }
 interface Trap { sprite: Phaser.GameObjects.Sprite; body: Phaser.Physics.Arcade.Body }
 
+interface GameState {
+  player: { x: number; y: number; hp: number; hunger: number; temp: number };
+  bp: { logs: number; rubble: number; snow: number; berries: number; arrows: number; pelts: number; meat: number };
+  base: { baseLogs: number; baseRubble: number; basePlanks: number; baseBricks: number; millInputLogs: number; qryInputRubble: number };
+  progression: { hasBow: boolean; hasCoat: boolean; furnaceLvl: number; furnaceEverFueled: boolean; furnaceLit: boolean };
+  dayClock: number;
+  buildings: { x: number; y: number; kind: string; hp: number; tex?: string }[];
+}
+
 class Game extends Phaser.Scene {
   private p!: Phaser.GameObjects.Sprite;
   private pb!: Phaser.Physics.Arcade.Body;
@@ -49,6 +58,7 @@ class Game extends Phaser.Scene {
   private sPileLbl: Phaser.GameObjects.Text | null = null;
   private bMode: string | null = null;
   private bPrev: Phaser.GameObjects.Sprite | null = null;
+  private buildDir: 'East' | 'West' = 'East';
   private gcd = 0;
   private playerHp = 100;
   private readonly MAX_HP = 100;
@@ -83,7 +93,7 @@ class Game extends Phaser.Scene {
   private projectiles: Arrow[] = [];
   private traps: Trap[] = [];
   private groundItems: Phaser.GameObjects.Sprite[] = [];
-  private fenceWalls: Phaser.GameObjects.Sprite[] = [];
+
   // combat
   private shootSlow = 0;
   // action pose
@@ -99,6 +109,10 @@ class Game extends Phaser.Scene {
   private msgT: number | null = null;
   private stepTimer = 0;
   private footprintTimer = 0;
+  // menu
+  private menuEl: HTMLDivElement | null = null;
+  private settingsEl: HTMLDivElement | null = null;
+  private saveBtnEl: HTMLButtonElement | null = null;
 
   constructor() { super('Game'); }
   private lit<T extends Phaser.GameObjects.Sprite>(s: T): T { s.setPipeline('Light2D'); return s; }
@@ -148,6 +162,16 @@ class Game extends Phaser.Scene {
     this.load.image('playerSnow', '/Player_snow.png');
     this.load.image('playerBuilding', '/PLayer_building.png');
     this.load.image('playerBuilding2', '/Player_Building_2.png');
+    // wall / gate / trap sprites
+    this.load.image('snareTrap', '/Snare.png');
+    this.load.image('woodWallEast', '/Wood_fence_east.png');
+    this.load.image('woodWallWest', '/Wood_fence_west.png');
+    this.load.image('woodGateEast', '/Wood_gate_east.png');
+    this.load.image('woodGateWest', '/Wood_gate_west.png');
+    this.load.image('stoneWallEast', '/Stone_wall_east.png');
+    this.load.image('stoneWallWest', '/Stone_wall_west.png');
+    this.load.image('stoneGateEast', '/Stone_gate_east.png');
+    this.load.image('stoneGateWest', '/Stone_gate_west.png');
   }
 
   create() {
@@ -205,6 +229,12 @@ class Game extends Phaser.Scene {
       .setOrigin(0.5).setScrollFactor(0).setDepth(9001).setAlpha(0);
 
     this.createHUD();
+
+    // show main menu on boot — delay 1 frame so scene is fully running
+    this.time.delayedCall(1, () => {
+      this.scene.pause();
+      this.showMainMenu();
+    });
   }
 
   update(_t: number, dt: number) {
@@ -268,7 +298,17 @@ class Game extends Phaser.Scene {
     for (const bu of this.bushes) bu.sprite.setDepth(bu.sprite.y);
     for (const w of this.wolves) w.sprite.setDepth(w.sprite.y);
 
-    if (this.bMode && this.bPrev) { const ptr = this.input.activePointer; this.bPrev.setPosition(ptr.worldX, ptr.worldY); }
+    if (this.bMode && this.bPrev) {
+      const ptr = this.input.activePointer;
+      const isWallGate = this.bMode.includes('Wall') || this.bMode.includes('Gate');
+      if (isWallGate) {
+        const gx = Math.round(ptr.worldX / 40) * 40;
+        const gy = Math.round(ptr.worldY / 20) * 20;
+        this.bPrev.setPosition(gx, gy);
+      } else {
+        this.bPrev.setPosition(ptr.worldX, ptr.worldY);
+      }
+    }
 
     this.tickDayNight(dt);
     this.tickStorm(dt);
@@ -291,29 +331,12 @@ class Game extends Phaser.Scene {
 
   /* ─── textures ─── */
   private genTex() {
-    // fence
-    const fg = this.add.graphics();
-    fg.fillStyle(0x8B5E3C); fg.fillRect(0, 0, 6, 28);
-    fg.fillStyle(0x6B3F1F); fg.fillRect(1, 0, 4, 4);
-    fg.fillStyle(0xA57548); fg.fillRect(0, 10, 6, 3); fg.fillRect(0, 20, 6, 3);
-    fg.generateTexture('fenceTex', 6, 28); fg.destroy();
-    // fence wall segment (horizontal plank)
-    const fw = this.add.graphics();
-    fw.fillStyle(0x8B5E3C); fw.fillRect(0, 0, 20, 6);
-    fw.fillStyle(0xA57548); fw.fillRect(0, 2, 20, 2);
-    fw.generateTexture('fenceWallTex', 20, 6); fw.destroy();
     // arrow projectile
     const ag = this.add.graphics();
     ag.fillStyle(0x8B5E3C); ag.fillRect(0, 3, 16, 2);
     ag.fillStyle(0xaaaaaa); ag.fillTriangle(16, 0, 20, 4, 16, 8);
     ag.fillStyle(0xcc8844); ag.fillRect(0, 2, 3, 4);
     ag.generateTexture('arrowTex', 20, 8); ag.destroy();
-    // trap
-    const tg = this.add.graphics();
-    tg.fillStyle(0x6B3F1F); tg.fillCircle(10, 10, 10);
-    tg.fillStyle(0x8B5E3C); tg.fillCircle(10, 10, 6);
-    tg.lineStyle(2, 0xaaaaaa); tg.strokeCircle(10, 10, 8);
-    tg.generateTexture('trapTex', 20, 20); tg.destroy();
     // particle textures
     const mkPart = (key: string, color: number) => {
       const pg = this.add.graphics(); pg.fillStyle(color); pg.fillRect(0, 0, 4, 4);
@@ -720,7 +743,7 @@ class Game extends Phaser.Scene {
     if (basePlanks < 5) { this.msg('Need 5 Planks (Mill)'); return; }
     if (this.totalRubble() < 5) { this.msg('Need 5 Rubble'); return; }
     basePlanks -= 5; this.spendRubble(5);
-    const sprite = this.add.sprite(this.p.x, this.p.y, 'trapTex').setDepth(1);
+    const sprite = this.add.sprite(this.p.x, this.p.y, 'snareTrap').setScale(0.12).setDepth(1);
     this.physics.add.existing(sprite, true);
     this.traps.push({ sprite, body: sprite.body as Phaser.Physics.Arcade.Body });
     sfx.build(); this.msg('Snare trap placed!');
@@ -892,7 +915,7 @@ class Game extends Phaser.Scene {
   }
   private drawBar(b: Bld) {
     b.bar.clear();
-    const names: Record<string, string> = { furnace: '🔥 Furnace', mill: '🪵 Mill', quarry: '⛏️ Quarry', igloo: '🏠 Igloo', woodHouse: '🏡 Wood House', stoneHouse: '🏰 Stone House', fence: '🪵 Fence' };
+    const names: Record<string, string> = { furnace: '🔥 Furnace', mill: '🪵 Mill', quarry: '⛏️ Quarry', igloo: '🏠 Igloo', woodHouse: '🏡 Wood House', stoneHouse: '🏰 Stone House', woodWall: '🧱 Wood Wall', woodGate: '🚪 Wood Gate', stoneWall: '🧱 Stone Wall', stoneGate: '🚪 Stone Gate' };
     if (b.kind === 'furnace') { b.lbl.setPosition(b.sprite.x, b.sprite.y - b.sprite.displayHeight / 2 - 14); b.lbl.setText(`🔥 Furnace Lvl ${this.furnaceLvl}`); return; }
     const w = 50, h = 6, bx = b.sprite.x - w / 2, by = b.sprite.y - b.sprite.displayHeight / 2 - 12;
     b.bar.fillStyle(0x333333, 0.8); b.bar.fillRect(bx, by, w, h);
@@ -902,8 +925,12 @@ class Game extends Phaser.Scene {
   }
   private enterBld(kind: string, tex: string, sc: number) {
     this.cancelBld(); this.bMode = kind;
-    this.bPrev = this.lit(this.add.sprite(0, 0, tex).setScale(sc).setAlpha(0.5)).setDepth(8000);
-    this.msg('Click to place. ESC to cancel.');
+    // for wall/gate kinds, append the current direction to the texture key
+    const isWallGate = kind.includes('Wall') || kind.includes('Gate');
+    const actualTex = isWallGate ? tex + this.buildDir : tex;
+    this.bPrev = this.lit(this.add.sprite(0, 0, actualTex).setScale(sc).setAlpha(0.5)).setDepth(8000);
+    if (isWallGate) this.bPrev.setOrigin(0.5, 1);
+    this.msg(isWallGate ? 'Click to place. R=rotate, ESC=cancel.' : 'Click to place. ESC to cancel.');
   }
   private cancelBld() { if (this.bPrev) this.bPrev.destroy(); this.bPrev = null; this.bMode = null; }
   private placeBld(wx: number, wy: number) {
@@ -928,41 +955,36 @@ class Game extends Phaser.Scene {
         if (!this.nearBase()) { this.msg('Must be near base!'); return; }
         if (baseBricks < 60 || basePlanks < 20) { this.msg('Need 60 Bricks + 20 Planks'); return; }
         baseBricks -= 60; basePlanks -= 20; this.startBuild('stoneHouse', 'stoneHouse', 0.18, wx, wy, timers.stoneHouse); this.pileVis(); break;
-      case 'fence':
-        if (this.totalLogs() < 5) { this.msg('Need 5 Logs'); return; }
-        this.spendLogs(5);
-        const fb = this.addBld(wx, wy, 'fenceTex', 'fence', 6, 6, 1.0);
-        this.physics.add.existing(fb.sprite, true);
-        for (const w of this.wolves) this.physics.add.collider(w.sprite, fb.sprite);
-        this.connectFences(fb);
-        sfx.build(); this.msg('Fence built!'); break;
-    }
-  }
-
-  /* ─── fence connections ─── */
-  private connectFences(newFence: Bld) {
-    const fences = this.blds.filter(b => b.kind === 'fence' && b !== newFence && b.sprite.active);
-    if (fences.length === 0) return;
-    let nearest: Bld | null = null, nearDist = 200;
-    for (const f of fences) {
-      const d = Phaser.Math.Distance.Between(newFence.sprite.x, newFence.sprite.y, f.sprite.x, f.sprite.y);
-      if (d < nearDist) { nearDist = d; nearest = f; }
-    }
-    if (!nearest) return;
-    const x1 = newFence.sprite.x, y1 = newFence.sprite.y;
-    const x2 = nearest.sprite.x, y2 = nearest.sprite.y;
-    const dist = Phaser.Math.Distance.Between(x1, y1, x2, y2);
-    const angle = Math.atan2(y2 - y1, x2 - x1);
-    const segLen = 12;
-    const count = Math.floor(dist / segLen);
-    for (let i = 1; i < count; i++) {
-      const t = i / count;
-      const sx = x1 + (x2 - x1) * t;
-      const sy = y1 + (y2 - y1) * t;
-      const seg = this.add.sprite(sx, sy, 'fenceWallTex').setRotation(angle).setDepth(sy);
-      this.physics.add.existing(seg, true);
-      for (const w of this.wolves) this.physics.add.collider(w.sprite, seg);
-      this.fenceWalls.push(seg);
+      case 'woodWall': case 'woodGate': case 'stoneWall': case 'stoneGate': {
+        const costs: Record<string, { res: 'planks' | 'bricks'; amt: number }> = {
+          woodWall: { res: 'planks', amt: 2 }, woodGate: { res: 'planks', amt: 5 },
+          stoneWall: { res: 'bricks', amt: 2 }, stoneGate: { res: 'bricks', amt: 5 }
+        };
+        const cost = costs[m];
+        if (cost.res === 'planks') {
+          if (basePlanks < cost.amt) { this.msg(`Need ${cost.amt} Planks (Mill)`); return; }
+          basePlanks -= cost.amt;
+        } else {
+          if (baseBricks < cost.amt) { this.msg(`Need ${cost.amt} Bricks (Quarry)`); return; }
+          baseBricks -= cost.amt;
+        }
+        const tex = m + this.buildDir; // e.g. woodWallEast
+        const bld = this.addBld(wx, wy, tex, m, this.getBldHp(m), this.getBldHp(m), 0.12);
+        bld.sprite.setOrigin(0.5, 1);
+        this.physics.add.existing(bld.sprite, true);
+        // thin collision body matching the wall orientation
+        const body = bld.sprite.body as Phaser.Physics.Arcade.StaticBody;
+        if (this.buildDir === 'East') {
+          body.setSize(bld.sprite.displayWidth * 0.8, bld.sprite.displayHeight * 0.3);
+          body.setOffset(bld.sprite.displayWidth * 0.1, bld.sprite.displayHeight * 0.6);
+        } else {
+          body.setSize(bld.sprite.displayWidth * 0.8, bld.sprite.displayHeight * 0.3);
+          body.setOffset(bld.sprite.displayWidth * 0.1, bld.sprite.displayHeight * 0.6);
+        }
+        for (const w of this.wolves) this.physics.add.collider(w.sprite, bld.sprite);
+        this.physics.add.collider(this.p, bld.sprite);
+        sfx.build(); this.msg(`${m.includes('Wall') ? 'Wall' : 'Gate'} placed!`); this.pileVis(); break;
+      }
     }
   }
 
@@ -1040,20 +1062,26 @@ class Game extends Phaser.Scene {
     const bld = this.addBld(b.wx, b.wy, b.tex, b.kind, this.getBldHp(b.kind), this.getBldHp(b.kind), b.sc);
     if (b.kind === 'mill') this.mill = bld;
     if (b.kind === 'quarry') this.qry = bld;
-    if (b.kind === 'fence') {
+    const isWG = ['woodWall', 'woodGate', 'stoneWall', 'stoneGate'].includes(b.kind);
+    if (isWG) {
+      bld.sprite.setOrigin(0.5, 1);
       this.physics.add.existing(bld.sprite, true);
+      const body = bld.sprite.body as Phaser.Physics.Arcade.StaticBody;
+      body.setSize(bld.sprite.displayWidth * 0.8, bld.sprite.displayHeight * 0.3);
+      body.setOffset(bld.sprite.displayWidth * 0.1, bld.sprite.displayHeight * 0.6);
       for (const w of this.wolves) this.physics.add.collider(w.sprite, bld.sprite);
+      this.physics.add.collider(this.p, bld.sprite);
     }
     sfx.build();
     this.p.setTexture('playerIdle');
     this.poseTimer = 0;
     this.building = null;
     this.pileVis();
-    const names: Record<string, string> = { mill: 'Lumber Mill', quarry: 'Quarry', igloo: 'Igloo', woodHouse: 'Wood House', stoneHouse: 'Stone House' };
+    const names: Record<string, string> = { mill: 'Lumber Mill', quarry: 'Quarry', igloo: 'Igloo', woodHouse: 'Wood House', stoneHouse: 'Stone House', woodWall: 'Wood Wall', woodGate: 'Wood Gate', stoneWall: 'Stone Wall', stoneGate: 'Stone Gate' };
     this.msg(`✅ ${names[b.kind] || b.kind} built!`);
   }
   private getBldHp(kind: string): number {
-    const hps: Record<string, number> = { mill: 15, quarry: 15, igloo: 3, woodHouse: 9, stoneHouse: 24, fence: 6 };
+    const hps: Record<string, number> = { mill: 15, quarry: 15, igloo: 3, woodHouse: 9, stoneHouse: 24, woodWall: 6, woodGate: 8, stoneWall: 12, stoneGate: 14 };
     return hps[kind] ?? 10;
   }
 
@@ -1147,10 +1175,20 @@ class Game extends Phaser.Scene {
     pauseBtn.onclick = () => this.togglePause();
     // pause overlay
     this.pauseOverlay = document.createElement('div'); this.pauseOverlay.id = 'pause-overlay';
-    this.pauseOverlay.innerHTML = '<div class="pause-text">⏸ PAUSED</div><div class="pause-sub">Press P or click ⏸ to resume</div>';
+    this.pauseOverlay.innerHTML = '<img src="/logo.jpg" class="pause-logo" /><div class="pause-text">⏸ PAUSED</div><div class="pause-sub">Press P or click ⏸ to resume</div>';
     document.body.appendChild(this.pauseOverlay);
     // P key for pause
-    window.addEventListener('keydown', (e) => { if (e.key === 'p' || e.key === 'P') this.togglePause(); });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'p' || e.key === 'P') this.togglePause();
+      if ((e.key === 'r' || e.key === 'R') && this.bMode && (this.bMode.includes('Wall') || this.bMode.includes('Gate'))) {
+        this.buildDir = this.buildDir === 'East' ? 'West' : 'East';
+        if (this.bPrev) {
+          const baseTex = this.bMode; // e.g. 'woodWall'
+          this.bPrev.setTexture(baseTex + this.buildDir);
+        }
+        this.msg(`🔄 Direction: ${this.buildDir}`);
+      }
+    });
     const btns = document.createElement('div'); btns.id = 'hud-buttons';
     btns.innerHTML = `<h3>🔨 Build</h3>
       <button id="b-mill">🪵 Lumber Mill<br><small>15 Logs (BP)</small></button>
@@ -1158,7 +1196,10 @@ class Game extends Phaser.Scene {
       <button id="b-ig">🏠 Igloo<br><small>10 Snow+5 Logs (BP)</small></button>
       <button id="b-wh">🏡 Wood House<br><small>40 Planks (Mill)</small></button>
       <button id="b-sh">🏰 Stone House<br><small>60 Bricks+20 Planks</small></button>
-      <button id="b-fence">🪵 Fence<br><small>5 Logs (BP)</small></button>
+      <button id="b-wwall">🧱 Wood Wall<br><small>2 Planks (Mill)</small></button>
+      <button id="b-wgate">🚪 Wood Gate<br><small>5 Planks (Mill)</small></button>
+      <button id="b-swall">🧱 Stone Wall<br><small>2 Bricks (Qry)</small></button>
+      <button id="b-sgate">🚪 Stone Gate<br><small>5 Bricks (Qry)</small></button>
       <hr style="border-color:rgba(255,255,255,.1);margin:6px 0">
       <h3>⚔️ Craft</h3>
       <button id="c-bow">🏹 Craft Bow<br><small>10 Planks (Mill)</small></button>
@@ -1178,7 +1219,10 @@ class Game extends Phaser.Scene {
     document.getElementById('b-ig')!.onclick = () => this.enterBld('igloo', 'igloo', 0.18);
     document.getElementById('b-wh')!.onclick = () => this.enterBld('woodHouse', 'woodHouse', 0.18);
     document.getElementById('b-sh')!.onclick = () => this.enterBld('stoneHouse', 'stoneHouse', 0.18);
-    document.getElementById('b-fence')!.onclick = () => this.enterBld('fence', 'fenceTex', 1.0);
+    document.getElementById('b-wwall')!.onclick = () => this.enterBld('woodWall', 'woodWall', 0.12);
+    document.getElementById('b-wgate')!.onclick = () => this.enterBld('woodGate', 'woodGate', 0.12);
+    document.getElementById('b-swall')!.onclick = () => this.enterBld('stoneWall', 'stoneWall', 0.12);
+    document.getElementById('b-sgate')!.onclick = () => this.enterBld('stoneGate', 'stoneGate', 0.12);
     document.getElementById('c-bow')!.onclick = () => this.craftBow();
     document.getElementById('c-arr')!.onclick = () => this.craftArrows();
     document.getElementById('c-coat')!.onclick = () => this.craftCoat();
@@ -1195,6 +1239,11 @@ class Game extends Phaser.Scene {
     document.getElementById('d-p')!.onclick = () => this.dropItem('pelts');
     document.getElementById('d-m')!.onclick = () => this.dropItem('meat');
     this.msgEl = document.createElement('div'); this.msgEl.id = 'game-msg'; document.body.appendChild(this.msgEl);
+    // save button (hidden until inside shelter)
+    this.saveBtnEl = document.createElement('button'); this.saveBtnEl.id = 'btn-save';
+    this.saveBtnEl.textContent = '💾 Save Game'; this.saveBtnEl.style.display = 'none';
+    btns.appendChild(this.saveBtnEl);
+    this.saveBtnEl.onclick = () => this.saveGame();
   }
   private dropItem(key: 'logs' | 'rubble' | 'snow' | 'berries' | 'arrows' | 'pelts' | 'meat') {
     if (this.bp[key] <= 0) { this.msg(`No ${key} to drop!`); return; }
@@ -1256,11 +1305,13 @@ class Game extends Phaser.Scene {
     this.p.setPosition(b.sprite.x, b.sprite.y + 5);
     const names: Record<string, string> = { igloo: 'Igloo', woodHouse: 'Wood House', stoneHouse: 'Stone House' };
     this.msg(`Entered ${names[b.kind] || b.kind}. Press Space to exit.`);
+    if (this.saveBtnEl) this.saveBtnEl.style.display = '';
   }
   private exitShelter() {
     if (!this.isInside) return; const b = this.isInside; this.isInside = null;
     this.p.setAlpha(1); this.p.setPosition(b.sprite.x, b.sprite.y + b.sprite.displayHeight / 2 + 20);
     this.msg('Exited shelter.');
+    if (this.saveBtnEl) this.saveBtnEl.style.display = 'none';
   }
   private gameOver(cause: string = 'froze') {
     this.exitShelter(); this.p.setAlpha(1);
@@ -1273,14 +1324,246 @@ class Game extends Phaser.Scene {
     requestAnimationFrame(() => el.style.opacity = '1');
     document.getElementById('restart-btn')!.onclick = () => {
       el.style.opacity = '0'; setTimeout(() => el.remove(), 600);
-      this.p.setPosition(MW / 2, MH / 2 + 120);
-      this.playerHp = this.MAX_HP; this.playerHunger = this.MAX_HUNGER; this.hungerClock = 0;
-      this.playerTemp = this.MAX_TEMP;
-      this.bp = { logs: 0, rubble: 0, snow: 0, berries: 0, arrows: 0, pelts: 0, meat: 0 };
-      baseLogs = 0; baseRubble = 0; basePlanks = 0; baseBricks = 0;
-      millInputLogs = 0; qryInputRubble = 0; furnaceLit = true; furnaceEverFueled = false;
       this.scene.resume();
-      this.msg('Respawned at base.');
+      this.showMainMenu();
+      this.scene.pause();
+    };
+  }
+
+  /* ─── save / load ─── */
+  private saveGame() {
+    const buildings: GameState['buildings'] = [];
+    for (const b of this.blds) {
+      if (b.kind === 'furnace') continue;
+      buildings.push({ x: b.sprite.x, y: b.sprite.y, kind: b.kind, hp: b.hp, tex: b.sprite.texture.key });
+    }
+    const state: GameState = {
+      player: { x: this.p.x, y: this.p.y, hp: this.playerHp, hunger: this.playerHunger, temp: this.playerTemp },
+      bp: { ...this.bp },
+      base: { baseLogs, baseRubble, basePlanks, baseBricks, millInputLogs, qryInputRubble },
+      progression: { hasBow, hasCoat, furnaceLvl: this.furnaceLvl, furnaceEverFueled, furnaceLit },
+      dayClock: this.dayClock,
+      buildings
+    };
+    localStorage.setItem('frozenFortuneSave', JSON.stringify(state));
+    this.msg('💾 Game Saved!');
+  }
+
+  private loadGame() {
+    const raw = localStorage.getItem('frozenFortuneSave');
+    if (!raw) { this.msg('No save found!'); return; }
+    const state: GameState = JSON.parse(raw);
+
+    // player
+    this.p.setPosition(state.player.x, state.player.y);
+    this.playerHp = state.player.hp;
+    this.playerHunger = state.player.hunger;
+    this.playerTemp = state.player.temp;
+    this.hungerClock = 0;
+
+    // backpack
+    this.bp = { ...state.bp };
+
+    // base storage
+    baseLogs = state.base.baseLogs;
+    baseRubble = state.base.baseRubble;
+    basePlanks = state.base.basePlanks;
+    baseBricks = state.base.baseBricks;
+    millInputLogs = state.base.millInputLogs;
+    qryInputRubble = state.base.qryInputRubble;
+
+    // progression
+    hasBow = state.progression.hasBow;
+    hasCoat = state.progression.hasCoat;
+    this.furnaceLvl = state.progression.furnaceLvl;
+    furnaceEverFueled = state.progression.furnaceEverFueled;
+    furnaceLit = state.progression.furnaceLit;
+
+    // world
+    this.dayClock = state.dayClock;
+
+    // destroy existing non-furnace buildings
+    for (const b of [...this.blds]) {
+      if (b.kind === 'furnace') continue;
+      b.sprite.destroy(); b.bar.destroy(); b.lbl.destroy();
+    }
+    this.blds = this.blds.filter(b => b.kind === 'furnace');
+    this.mill = null; this.qry = null;
+
+    // rebuild saved buildings
+    for (const sb of state.buildings) {
+      const texMap: Record<string, string> = { mill: 'lumberMill', quarry: 'stoneQuarry', igloo: 'igloo', woodHouse: 'woodHouse', stoneHouse: 'stoneHouse' };
+      const isWG = ['woodWall', 'woodGate', 'stoneWall', 'stoneGate'].includes(sb.kind);
+      const tex = isWG ? (sb.tex || sb.kind + 'East') : (texMap[sb.kind] || sb.kind);
+      const sc = isWG ? 0.12 : 0.18;
+      const bld = this.addBld(sb.x, sb.y, tex, sb.kind, sb.hp, this.getBldHp(sb.kind), sc);
+      if (sb.kind === 'mill') this.mill = bld;
+      if (sb.kind === 'quarry') this.qry = bld;
+      if (isWG) {
+        bld.sprite.setOrigin(0.5, 1);
+        this.physics.add.existing(bld.sprite, true);
+        const body = bld.sprite.body as Phaser.Physics.Arcade.StaticBody;
+        body.setSize(bld.sprite.displayWidth * 0.8, bld.sprite.displayHeight * 0.3);
+        body.setOffset(bld.sprite.displayWidth * 0.1, bld.sprite.displayHeight * 0.6);
+        for (const w of this.wolves) this.physics.add.collider(w.sprite, bld.sprite);
+        this.physics.add.collider(this.p, bld.sprite);
+      }
+    }
+
+    // furnace visuals
+    if (furnaceLit) {
+      if (this.furnace) this.furnace.sprite.clearTint();
+      const lightR = [380, 500, 800][this.furnaceLvl - 1];
+      this.fLight.setRadius(lightR);
+    } else {
+      if (this.furnace) this.furnace.sprite.setTint(0x667788);
+      this.fLight.setRadius(0);
+    }
+    if (this.furnace) this.drawBar(this.furnace);
+    this.pileVis();
+    this.msg('💾 Game Loaded!');
+  }
+
+  private resetGame() {
+    // reset globals
+    baseLogs = 0; baseRubble = 0; basePlanks = 0; baseBricks = 0;
+    millInputLogs = 0; qryInputRubble = 0;
+    furnaceLit = true; furnaceEverFueled = false;
+    hasBow = false; hasCoat = false;
+
+    // reset player
+    this.p.setPosition(MW / 2, MH / 2 + 120);
+    this.p.setAlpha(1);
+    this.playerHp = this.MAX_HP;
+    this.playerHunger = this.MAX_HUNGER;
+    this.hungerClock = 0;
+    this.playerTemp = this.MAX_TEMP;
+    this.bp = { logs: 0, rubble: 0, snow: 0, berries: 0, arrows: 0, pelts: 0, meat: 0 };
+    this.dayClock = 0;
+    this.isInside = null;
+    this.furnaceLvl = 1;
+
+    // destroy non-furnace buildings
+    for (const b of [...this.blds]) {
+      if (b.kind === 'furnace') continue;
+      b.sprite.destroy(); b.bar.destroy(); b.lbl.destroy();
+    }
+    this.blds = this.blds.filter(b => b.kind === 'furnace');
+    this.mill = null; this.qry = null;
+
+    // furnace visuals
+    if (this.furnace) {
+      this.furnace.sprite.clearTint();
+      this.drawBar(this.furnace);
+    }
+    this.fLight.setRadius(380);
+    this.pileVis();
+  }
+
+  /* ─── main menu ─── */
+  private showMainMenu() {
+    // hide save button
+    if (this.saveBtnEl) this.saveBtnEl.style.display = 'none';
+
+    // pause scene
+    if (!this.scene.isPaused()) this.scene.pause();
+
+    // if menu already exists, just show it
+    if (this.menuEl) {
+      this.menuEl.style.display = 'flex';
+      // update load button state
+      const loadBtn = this.menuEl.querySelector('#menu-load') as HTMLButtonElement;
+      if (loadBtn) {
+        const hasSave = !!localStorage.getItem('frozenFortuneSave');
+        loadBtn.disabled = !hasSave;
+        loadBtn.style.opacity = hasSave ? '1' : '0.4';
+        loadBtn.style.cursor = hasSave ? 'pointer' : 'not-allowed';
+      }
+      // hide settings
+      if (this.settingsEl) this.settingsEl.style.display = 'none';
+      const menuBtns = this.menuEl.querySelector('#menu-buttons') as HTMLDivElement;
+      if (menuBtns) menuBtns.style.display = 'flex';
+      return;
+    }
+
+    const hasSave = !!localStorage.getItem('frozenFortuneSave');
+
+    this.menuEl = document.createElement('div');
+    this.menuEl.id = 'main-menu';
+    this.menuEl.innerHTML = `
+      <img src="/logo.jpg" alt="Frozen Fortune" id="menu-logo" />
+      <button id="menu-gear" title="Settings">⚙️</button>
+      <div id="menu-buttons">
+        <button class="menu-btn" id="menu-new">❄️ New Game</button>
+        <button class="menu-btn" id="menu-load" ${hasSave ? '' : 'disabled'}
+          style="${hasSave ? '' : 'opacity:0.4;cursor:not-allowed'}">💾 Load Game</button>
+      </div>
+      <div id="settings-panel" style="display:none">
+        <h3>⚙️ Settings</h3>
+        <label>🔊 Volume</label>
+        <input type="range" id="vol-slider" min="0" max="100" value="${Math.round(sfx.getVolume() * 200)}" />
+        <span id="vol-value">${Math.round(sfx.getVolume() * 200)}%</span>
+        <button class="menu-btn" id="settings-back">← Back</button>
+      </div>
+    `;
+    document.body.appendChild(this.menuEl);
+
+    const menuBtns = document.getElementById('menu-buttons')!;
+    this.settingsEl = document.getElementById('settings-panel') as HTMLDivElement;
+
+    // helper: fade out menu then callback
+    const fadeOut = (cb: () => void) => {
+      this.menuEl!.style.transition = 'opacity 0.6s ease';
+      this.menuEl!.style.opacity = '0';
+      setTimeout(() => {
+        this.menuEl!.style.display = 'none';
+        this.menuEl!.style.opacity = '1';
+        this.menuEl!.style.transition = '';
+        cb();
+      }, 600);
+    };
+
+    // New Game
+    document.getElementById('menu-new')!.onclick = () => {
+      this.resetGame();
+      fadeOut(() => {
+        this.scene.resume();
+        this.paused = false;
+        if (this.pauseOverlay) this.pauseOverlay.style.display = 'none';
+        this.msg('🏔️ A new adventure begins!');
+      });
+    };
+
+    // Load Game
+    document.getElementById('menu-load')!.onclick = () => {
+      if (!localStorage.getItem('frozenFortuneSave')) return;
+      this.loadGame();
+      fadeOut(() => {
+        this.scene.resume();
+        this.paused = false;
+        if (this.pauseOverlay) this.pauseOverlay.style.display = 'none';
+      });
+    };
+
+    // Settings (gear button)
+    document.getElementById('menu-gear')!.onclick = () => {
+      menuBtns.style.display = 'none';
+      this.settingsEl!.style.display = 'flex';
+    };
+
+    // Volume slider
+    const slider = document.getElementById('vol-slider') as HTMLInputElement;
+    const volVal = document.getElementById('vol-value')!;
+    slider.oninput = () => {
+      const v = parseInt(slider.value);
+      sfx.setVolume(v / 200); // 0..100 maps to 0..0.5
+      volVal.textContent = `${v}%`;
+    };
+
+    // Back from settings
+    document.getElementById('settings-back')!.onclick = () => {
+      this.settingsEl!.style.display = 'none';
+      menuBtns.style.display = 'flex';
     };
   }
 }

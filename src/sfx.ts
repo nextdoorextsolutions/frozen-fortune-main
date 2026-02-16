@@ -13,6 +13,9 @@ export class SFX {
         this.master.connect(this.ctx.destination);
     }
 
+    setVolume(v: number) { if (this.master) this.master.gain.value = v; }
+    getVolume(): number { return this.master ? this.master.gain.value : 0.25; }
+
     private ensure() { this.init(); if (this.ctx!.state === 'suspended') this.ctx!.resume(); }
 
     private noise(dur: number, freq: number, q: number, vol = 0.4) {
