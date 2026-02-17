@@ -107,7 +107,7 @@ export class CraftingManager {
         if (s.bp.torches < 1) { s.msg('Need a Torch (BP)'); return; }
         s.bp.torches--;
         const tx = s.p.x, ty = s.p.y;
-        const sprite = s.lit(s.add.sprite(tx, ty, 'torchTex').setScale(0.12).setDepth(2));
+        const sprite = s.lit(s.add.sprite(tx, ty, 'torchTex').setScale(0.05).setDepth(2));
         const light = s.lights.addLight(tx, ty, 500, 0xffaa44, 1.5);
         s.placedTorches.push({ sprite, light, x: tx, y: ty });
         s.clearFog(tx, ty, 600);
@@ -133,7 +133,7 @@ export class CraftingManager {
         if (S.basePlanks < 10) { s.msg('Need 10 Planks (Mill)'); return; }
         S.basePlanks -= 10;
         S.bowDurability = BOW_DUR;
-        const bowSprite = s.lit(s.add.sprite(s.p.x, s.p.y + 20, 'bowGround').setScale(0.12));
+        const bowSprite = s.lit(s.add.sprite(s.p.x, s.p.y + 20, 'bowGround').setScale(0.05));
         s.groundItems.push(bowSprite);
         this.sfx.build(); s.msg('🏹 Bow crafted! Walk to it and press Space to equip.');
         s.pileVis();

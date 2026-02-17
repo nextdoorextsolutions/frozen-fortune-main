@@ -82,7 +82,7 @@ export class BuildingManager {
 
     /* ─── core helpers ─── */
 
-    addBld(x: number, y: number, tex: string, kind: string, hp: number, max: number, sc = 0.10): Bld {
+    addBld(x: number, y: number, tex: string, kind: string, hp: number, max: number, sc = 0.16): Bld {
         const s = this.scene;
         const sprite = s.lit(s.add.sprite(x, y, tex).setScale(sc));
         const bar = s.add.graphics();
@@ -166,27 +166,27 @@ export class BuildingManager {
         switch (m) {
             case 'mill':
                 if (s.mill) { s.msg('Already built!'); return; } if (s.totalLogs() < 15) { s.msg('Need 15 Logs'); return; }
-                s.spendLogs(15); this.startBuild('mill', 'lumberMill', 0.10, wx, wy, timers.mill); break;
+                s.spendLogs(15); this.startBuild('mill', 'lumberMill', 0.16, wx, wy, timers.mill); break;
             case 'quarry':
                 if (s.qry) { s.msg('Already built!'); return; } if (s.totalRubble() < 15) { s.msg('Need 15 Rubble'); return; }
-                s.spendRubble(15); this.startBuild('quarry', 'stoneQuarry', 0.10, wx, wy, timers.quarry); break;
+                s.spendRubble(15); this.startBuild('quarry', 'stoneQuarry', 0.16, wx, wy, timers.quarry); break;
             case 'anvil':
                 if (s.anvil) { s.msg('Already built!'); return; } if (S.baseBricks < 15 || s.bp.iron < 10) { s.msg('Need 15 Bricks + 10 Iron (BP)'); return; }
-                S.baseBricks -= 15; s.bp.iron -= 10; this.startBuild('anvil', 'anvilTex', 0.10, wx, wy, timers.anvil); s.pileVis(); break;
+                S.baseBricks -= 15; s.bp.iron -= 10; this.startBuild('anvil', 'anvilTex', 0.16, wx, wy, timers.anvil); s.pileVis(); break;
             case 'researchTable':
                 if (s.researchTable) { s.msg('Already built!'); return; } if (s.totalLogs() < 15 || S.baseBricks < 10) { s.msg('Need 15 Logs + 10 Bricks'); return; }
-                s.spendLogs(15); S.baseBricks -= 10; this.startBuild('researchTable', 'texResearchTable', 0.10, wx, wy, timers.researchTable); s.pileVis(); break;
+                s.spendLogs(15); S.baseBricks -= 10; this.startBuild('researchTable', 'texResearchTable', 0.16, wx, wy, timers.researchTable); s.pileVis(); break;
             case 'igloo':
                 if (s.bp.snow < 10 || s.totalLogs() < 5) { s.msg('Need 10 Snow + 5 Logs'); return; }
-                s.bp.snow -= 10; s.spendLogs(5); this.startBuild('igloo', 'igloo', 0.10, wx, wy, timers.igloo); break;
+                s.bp.snow -= 10; s.spendLogs(5); this.startBuild('igloo', 'igloo', 0.16, wx, wy, timers.igloo); break;
             case 'woodHouse':
                 if (!s.crafting.nearBase()) { s.msg('Must be near base!'); return; }
                 if (S.basePlanks < 40) { s.msg('Need 40 Planks (Mill)'); return; }
-                S.basePlanks -= 40; this.startBuild('woodHouse', 'woodHouse', 0.10, wx, wy, timers.woodHouse); s.pileVis(); break;
+                S.basePlanks -= 40; this.startBuild('woodHouse', 'woodHouse', 0.16, wx, wy, timers.woodHouse); s.pileVis(); break;
             case 'stoneHouse':
                 if (!s.crafting.nearBase()) { s.msg('Must be near base!'); return; }
                 if (S.baseBricks < 60 || S.basePlanks < 20) { s.msg('Need 60 Bricks + 20 Planks'); return; }
-                S.baseBricks -= 60; S.basePlanks -= 20; this.startBuild('stoneHouse', 'stoneHouse', 0.10, wx, wy, timers.stoneHouse); s.pileVis(); break;
+                S.baseBricks -= 60; S.basePlanks -= 20; this.startBuild('stoneHouse', 'stoneHouse', 0.16, wx, wy, timers.stoneHouse); s.pileVis(); break;
             case 'woodWall': case 'woodGate': case 'stoneWall': case 'stoneGate': {
                 const costs: Record<string, { res: 'planks' | 'bricks'; amt: number }> = {
                     woodWall: { res: 'planks', amt: 2 }, woodGate: { res: 'planks', amt: 5 },
@@ -201,7 +201,7 @@ export class BuildingManager {
                     S.baseBricks -= cost.amt;
                 }
                 const tex = m + this.buildDir;
-                const bld = this.addBld(wx, wy, tex, m, this.getBldHp(m), this.getBldHp(m), 0.07);
+                const bld = this.addBld(wx, wy, tex, m, this.getBldHp(m), this.getBldHp(m), 0.08);
                 bld.sprite.setOrigin(0.5, 1);
                 s.physics.add.existing(bld.sprite, true);
                 const body = bld.sprite.body as Phaser.Physics.Arcade.StaticBody;

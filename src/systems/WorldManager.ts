@@ -86,9 +86,9 @@ export class WorldManager {
                 this.res.push(r);
             }
         };
-        mk('tree', 'logs', 35, 0.10, TREE_CAP);
+        mk('tree', 'logs', 35, 0.16, TREE_CAP);
         mk('rock', 'rubble', 20, 0.06, STONE_CAP);
-        mk('snowPile', 'snow', 18, 0.05);
+        mk('snowPile', 'snow', 30, 0.05);
         // iron ore – placed further from center
         for (let i = 0; i < 8; i++) {
             let x: number, y: number, tries = 0;
@@ -112,7 +112,7 @@ export class WorldManager {
             r.timer = (r.timer ?? 0) + dt;
             if (r.kind === 'logs' && r.timer >= TREE_REGROW) {
                 r.ready = true; r.capacity = TREE_CAP; r.timer = 0;
-                r.sprite.setScale(0.10);
+                r.sprite.setScale(0.16);
                 r.sprite.setTexture(this.s.sOn ? 'treeBlizzard' : 'tree');
             }
             if (r.kind === 'rubble' && r.timer >= STONE_REGROW) {

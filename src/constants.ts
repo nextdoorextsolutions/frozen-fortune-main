@@ -45,7 +45,7 @@ export const QRY_BRICK_CAP = 100;
 
 /* ── Refining & Fuel ── */
 export const REFINE_TICK = 2_000;
-export const FUEL_TICK = 5_000;
+export const FUEL_TICK = 15_000;
 
 /* ── Tool durability ── */
 export const STONE_TOOL_DUR = 30;

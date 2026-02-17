@@ -111,6 +111,7 @@ class Game extends Phaser.Scene {
   lit<T extends Phaser.GameObjects.Sprite>(s: T): T { s.setPipeline('Light2D'); return s; }
   bpTotal(): number { return this.bp.logs + this.bp.rubble + this.bp.snow + this.bp.berries + this.bp.arrows + this.bp.pelts + this.bp.meat + this.bp.iron + this.bp.torches; }
   psc(): number { return S.currentOutfit === 'steam' ? STEAM_PSC : PSC; }
+  zoomCamera(delta: number) { const cam = this.cameras.main; cam.setZoom(Phaser.Math.Clamp(cam.zoom + delta, 1, 4)); }
   /** Total logs available (backpack + furnace storage) */
   totalLogs(): number { return this.bp.logs + S.baseLogs; }
   /** Total rubble available (backpack + furnace storage) */
@@ -146,15 +147,15 @@ class Game extends Phaser.Scene {
     this.load.image('wolfDay', '/wolf_day.png');
     this.load.image('wolfNight', '/wolf_night.png');
     this.load.image('deer', '/Deer.png');
-    this.load.image('player', '/player_hooded.png');
+    this.load.image('player', '/PLayer_hooded.png');
     // hooded action sprites
-    this.load.image('playerIdle', '/player_hooded.png');
+    this.load.image('playerIdle', '/PLayer_hooded.png');
     this.load.image('playerCut', '/Player_hooded_cutting.png');
-    this.load.image('playerMine', '/PLayer_hooded_mining.png');
-    this.load.image('playerShoot', '/Player_hooded_Shooting.png');
+    this.load.image('playerMine', '/Player_hooded_mining.png');
+    this.load.image('playerShoot', '/Player_hooded_shooting.png');
     this.load.image('playerSnow', '/Player_hooded_snow.png');
     this.load.image('playerBuilding', '/Player_hooded_building.png');
-    this.load.image('playerBuilding2', '/Player_hooded_Building_2.png');
+    this.load.image('playerBuilding2', '/Player_hooded_building_2.png');
     // shared action sprites
     this.load.image('treeStump', '/Tree_stump.png');
     this.load.image('bowGround', '/Bow_and_Arrow_ground.png');
@@ -209,11 +210,12 @@ class Game extends Phaser.Scene {
     this.pb.setCollideWorldBounds(true);
     this.pb.setSize(22, 10).setOffset(3, 34);
     this.cameras.main.startFollow(this.p, true, 0.09, 0.09);
+    this.cameras.main.setZoom(2);
 
     // crash site set piece (distant prop for storytelling)
-    this.lit(this.add.sprite(300, 280, 'shipWreck').setScale(0.22).setDepth(0).setTint(0xccddee));
+    this.lit(this.add.sprite(300, 280, 'shipWreck').setScale(0.35).setDepth(0).setTint(0xccddee));
 
-    this.furnace = this.buildings.addBld(MW / 2, MH / 2 - 80, 'baseFurnace', 'furnace', 999, 999, 0.12);
+    this.furnace = this.buildings.addBld(MW / 2, MH / 2 - 80, 'baseFurnace', 'furnace', 999, 999, 0.25);
     this.world.scatter();
     this.combat.spawnWolves();
     this.world.spawnDeer();
@@ -237,6 +239,10 @@ class Game extends Phaser.Scene {
     kb.addKey('E').on('down', () => this.eatMeat());
     kb.addKey('T').on('down', () => this.combat.placeTrap());
     kb.addKey('C').on('down', () => this.crafting.placeTorchItem());
+    kb.addKey('PLUS').on('down', () => this.zoomCamera(0.25));
+    kb.addKey('MINUS').on('down', () => this.zoomCamera(-0.25));
+    kb.addKey('OPEN_BRACKET').on('down', () => this.zoomCamera(-0.25));
+    kb.addKey('CLOSED_BRACKET').on('down', () => this.zoomCamera(0.25));
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
       if (this.buildings.bMode && ptr.leftButtonDown()) { this.buildings.placeBld(ptr.worldX, ptr.worldY); return; }
       if (this.buildings.bMode && ptr.rightButtonDown()) { this.buildings.cancelBld(); return; }
@@ -820,7 +826,7 @@ class Game extends Phaser.Scene {
     const sec = dt / 1000;
     let rate = 0; // per second
     if (this.isInside) {
-      rate = 5; // shelter regen
+      rate = 15; // shelter regen – extra fast
       this.inDeepFreeze = false;
     } else {
       // near furnace?
@@ -835,9 +841,9 @@ class Game extends Phaser.Scene {
       // deep freeze: in fog (far from furnace AND all torches)
       this.inDeepFreeze = !nearFurnace && !nearTorch;
       if (nearFurnace) {
-        rate = 2;
+        rate = 8;
       } else if (nearTorch) {
-        rate = 1; // torches warm but less than furnace
+        rate = 3; // torches warm but less than furnace
       } else {
         // DEEP FREEZE: drain fast
         rate = -10;
@@ -903,16 +909,16 @@ class Game extends Phaser.Scene {
     wireDropdowns(btns);
     document.body.appendChild(btns);
     const timer = document.createElement('div'); timer.id = 'hud-timer'; document.body.appendChild(timer);
-    document.getElementById('b-mill')!.onclick = () => this.buildings.enterBld('mill', 'lumberMill', 0.10);
-    document.getElementById('b-qry')!.onclick = () => this.buildings.enterBld('quarry', 'stoneQuarry', 0.10);
-    document.getElementById('b-anvil')!.onclick = () => this.buildings.enterBld('anvil', 'anvilTex', 0.10);
-    document.getElementById('b-ig')!.onclick = () => this.buildings.enterBld('igloo', 'igloo', 0.10);
-    document.getElementById('b-wh')!.onclick = () => this.buildings.enterBld('woodHouse', 'woodHouse', 0.10);
-    document.getElementById('b-sh')!.onclick = () => this.buildings.enterBld('stoneHouse', 'stoneHouse', 0.10);
-    document.getElementById('b-wwall')!.onclick = () => this.buildings.enterBld('woodWall', 'woodWall', 0.07);
-    document.getElementById('b-wgate')!.onclick = () => this.buildings.enterBld('woodGate', 'woodGate', 0.07);
-    document.getElementById('b-swall')!.onclick = () => this.buildings.enterBld('stoneWall', 'stoneWall', 0.07);
-    document.getElementById('b-sgate')!.onclick = () => this.buildings.enterBld('stoneGate', 'stoneGate', 0.07);
+    document.getElementById('b-mill')!.onclick = () => this.buildings.enterBld('mill', 'lumberMill', 0.16);
+    document.getElementById('b-qry')!.onclick = () => this.buildings.enterBld('quarry', 'stoneQuarry', 0.16);
+    document.getElementById('b-anvil')!.onclick = () => this.buildings.enterBld('anvil', 'anvilTex', 0.16);
+    document.getElementById('b-ig')!.onclick = () => this.buildings.enterBld('igloo', 'igloo', 0.16);
+    document.getElementById('b-wh')!.onclick = () => this.buildings.enterBld('woodHouse', 'woodHouse', 0.16);
+    document.getElementById('b-sh')!.onclick = () => this.buildings.enterBld('stoneHouse', 'stoneHouse', 0.16);
+    document.getElementById('b-wwall')!.onclick = () => this.buildings.enterBld('woodWall', 'woodWall', 0.08);
+    document.getElementById('b-wgate')!.onclick = () => this.buildings.enterBld('woodGate', 'woodGate', 0.08);
+    document.getElementById('b-swall')!.onclick = () => this.buildings.enterBld('stoneWall', 'stoneWall', 0.08);
+    document.getElementById('b-sgate')!.onclick = () => this.buildings.enterBld('stoneGate', 'stoneGate', 0.08);
     document.getElementById('c-stools')!.onclick = () => this.crafting.craftStoneTools();
     document.getElementById('c-itools')!.onclick = () => this.crafting.craftIronTools();
     document.getElementById('c-bow')!.onclick = () => this.crafting.craftBow();
@@ -937,7 +943,7 @@ class Game extends Phaser.Scene {
     document.getElementById('d-m')!.onclick = () => this.dropItem('meat');
     document.getElementById('d-i')!.onclick = () => this.dropItem('iron');
     document.getElementById('d-t')!.onclick = () => this.dropItem('torches');
-    document.getElementById('b-rtable')!.onclick = () => this.buildings.enterBld('researchTable', 'texResearchTable', 0.10);
+    document.getElementById('b-rtable')!.onclick = () => this.buildings.enterBld('researchTable', 'texResearchTable', 0.16);
     document.getElementById('c-sled')!.onclick = () => this.crafting.craftSled();
     document.getElementById('r-thick')!.onclick = () => this.crafting.researchThickSkin();
     document.getElementById('r-eff')!.onclick = () => this.crafting.researchEfficiency();
@@ -949,6 +955,21 @@ class Game extends Phaser.Scene {
     this.saveBtnEl.textContent = '💾 Save Game'; this.saveBtnEl.style.display = 'none';
     btns.appendChild(this.saveBtnEl);
     this.saveBtnEl.onclick = () => this.saveGame();
+
+    // ── Zoom Controls ──
+    const zoomWrap = document.createElement('div');
+    zoomWrap.id = 'zoom-controls';
+    zoomWrap.style.cssText = 'position:fixed;top:10px;left:10px;display:flex;gap:4px;z-index:9999;pointer-events:auto;';
+    const mkZBtn = (label: string, delta: number) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'width:36px;height:36px;font-size:20px;background:rgba(0,0,0,0.6);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:6px;cursor:pointer;pointer-events:auto;';
+      b.onclick = (e) => { e.stopPropagation(); this.zoomCamera(delta); };
+      return b;
+    };
+    zoomWrap.appendChild(mkZBtn('−', -0.25));
+    zoomWrap.appendChild(mkZBtn('+', 0.25));
+    document.body.appendChild(zoomWrap);
 
     // ── Virtual Touch Controls ──
     createTouchControls();
@@ -1027,6 +1048,7 @@ class Game extends Phaser.Scene {
       hasWorkerForMill: this.world.hasWorkerFor('mill'),
       hasWorkerForQry: this.world.hasWorkerFor('quarry'),
       stormOn: this.sOn, stormElapsed: this.world.sElap,
+      fuelTimer: this.fuelTimer, furnaceLit: S.furnaceLit,
     });
   }
   msg(t: string) {
@@ -1160,7 +1182,7 @@ class Game extends Phaser.Scene {
       const texMap: Record<string, string> = { mill: 'lumberMill', quarry: 'stoneQuarry', igloo: 'igloo', woodHouse: 'woodHouse', stoneHouse: 'stoneHouse', anvil: 'anvilTex', researchTable: 'texResearchTable' };
       const isWG = ['woodWall', 'woodGate', 'stoneWall', 'stoneGate'].includes(sb.kind);
       const tex = isWG ? (sb.tex || sb.kind + 'East') : (texMap[sb.kind] || sb.kind);
-      const sc = isWG ? 0.07 : 0.10;
+      const sc = isWG ? 0.08 : 0.16;
       const bld = this.buildings.addBld(sb.x, sb.y, tex, sb.kind, sb.hp, this.buildings.getBldHp(sb.kind), sc);
       if (sb.kind === 'mill') this.mill = bld;
       if (sb.kind === 'quarry') this.qry = bld;
@@ -1180,7 +1202,7 @@ class Game extends Phaser.Scene {
     // rebuild torches
     if (state.placedTorches) {
       for (const pt of state.placedTorches) {
-        const sprite = this.lit(this.add.sprite(pt.x, pt.y, 'torchTex').setScale(0.12).setDepth(2));
+        const sprite = this.lit(this.add.sprite(pt.x, pt.y, 'torchTex').setScale(0.05).setDepth(2));
         const light = this.lights.addLight(pt.x, pt.y, 500, 0xffaa44, 1.5);
         this.placedTorches.push({ sprite, light, x: pt.x, y: pt.y });
       }

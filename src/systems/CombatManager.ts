@@ -126,7 +126,7 @@ export class CombatManager {
         if (s.bp.logs < 2) { s.msg('Need 2 Logs (BP)'); return; }
         if (s.bp.meat < 1) { s.msg('Need 1 Meat (BP)'); return; }
         s.bp.logs -= 2; s.bp.meat -= 1;
-        const sprite = s.add.sprite(s.p.x, s.p.y, 'snareTrap').setScale(0.12).setDepth(1);
+        const sprite = s.add.sprite(s.p.x, s.p.y, 'snareTrap').setScale(0.05).setDepth(1);
         s.physics.add.existing(sprite, true);
         this.traps.push({ sprite, body: sprite.body as Phaser.Physics.Arcade.Body });
         this.sfx.build(); s.msg('Snare trap placed!');
