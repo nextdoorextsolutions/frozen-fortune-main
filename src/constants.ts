@@ -3,7 +3,7 @@ export const MW = 4800;
 export const MH = 4800;
 export const RANGE = 130;
 export const PSC = 0.09;
-export const STEAM_PSC = 0.25;
+export const STEAM_PSC = 0.09;
 
 /* ── Weather & Day/Night ── */
 export const STORM_LEN = 15_000;
