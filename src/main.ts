@@ -178,6 +178,9 @@ class Game extends Phaser.Scene {
     this.load.image('steamSnow', '/Player_steam_snow.png');
     this.load.image('steamBuilding', '/Player_steam_building1.png');
     this.load.image('steamBuilding2', '/PLayer_steam_building2.png');
+    // interaction zone sprites
+    this.load.image('enterBox', '/Enter_box.png');
+    this.load.image('dropBox', '/Drop_box.png');
   }
 
   create() {
@@ -225,7 +228,7 @@ class Game extends Phaser.Scene {
     this.fogTexture.fill(0x1a2c42, 0.95);
     // create stamp sprite for erasing
     this.fogStamp = this.add.sprite(0, 0, 'softBrush').setVisible(false);
-    this.clearFog(MW / 2, MH / 2, 600); // clear around spawn
+    this.clearFog(MW / 2, MH / 2, 1800); // clear around spawn (matches furnace Lvl 1)
 
     // glacial wall at north edge
     this.buildGlacialWall();
@@ -379,8 +382,9 @@ class Game extends Phaser.Scene {
       if (this.healTimer >= 1000) { this.healTimer = 0; this.playerHp = Math.min(this.playerHp + 1, this.MAX_HP); }
     } else { this.healTimer = 0; }
 
-    // compass: point toward glacial wall (north center)
-    const goalX = MW / 2, goalY = 150;
+    // compass: point toward base (furnace)
+    const goalX = this.furnace ? this.furnace.sprite.x : MW / 2;
+    const goalY = this.furnace ? this.furnace.sprite.y : MH / 2;
     const ang = Math.atan2(goalY - this.p.y, goalX - this.p.x) - Math.PI / 2;
     if (this.compassEl) this.compassEl.style.transform = `translateX(-50%) rotate(${ang}rad)`;
 
@@ -407,6 +411,12 @@ class Game extends Phaser.Scene {
     // victory check: furnace reaches the glacial wall
     if (S.furnaceMobile && this.furnace && this.furnace.sprite.y <= 200) {
       this.victory();
+    }
+
+    // furnace lighthouse: always clear fog around furnace while lit
+    if (this.furnace && S.furnaceLit) {
+      const fogR = [1000, 1600, 2200][Math.min(this.furnaceLvl, 3) - 1] || 1000;
+      this.clearFog(this.furnace.sprite.x, this.furnace.sprite.y, fogR);
     }
 
     // clear fog as player moves
@@ -544,7 +554,7 @@ class Game extends Phaser.Scene {
   }
   clearBaseFog() {
     if (!this.furnace) return;
-    const radii = [1200, 2400, 3600];
+    const radii = [1800, 3200, 4800];
     const radius = radii[Math.min(this.furnaceLvl, 3) - 1] || 1200;
     this.clearFog(this.furnace.sprite.x, this.furnace.sprite.y, radius);
   }
@@ -633,34 +643,41 @@ class Game extends Phaser.Scene {
     }
 
     // auto-deposit at furnace (logs + rubble, partial deposit)
-    if (this.furnace && Phaser.Math.Distance.Between(px, py, this.furnace.sprite.x, this.furnace.sprite.y) < 350 && (this.bp.logs > 0 || this.bp.rubble > 0)) {
-      const depL = Math.min(this.bp.logs, FURNACE_LOG_CAP - S.baseLogs);
-      const depR = Math.min(this.bp.rubble, FURNACE_RUBBLE_CAP - S.baseRubble);
-      if (depL > 0 || depR > 0) {
-        this.bp.logs -= depL; this.bp.rubble -= depR;
-        S.baseLogs += depL; S.baseRubble += depR;
-        if (depL > 0) S.furnaceEverFueled = true;
-        const parts: string[] = []; if (depL > 0) parts.push(`${depL} logs`); if (depR > 0) parts.push(`${depR} rubble`);
-        this.msg(`+${parts.join(' + ')} → Furnace`); sfx.build(); this.pileVis(); return;
-      } else {
-        this.msg('Furnace storage full!');
+    if (this.furnace && (this.bp.logs > 0 || this.bp.rubble > 0)) {
+      const boxTarget = this.furnace.box || this.furnace.sprite;
+      const furnDist = Phaser.Math.Distance.Between(px, py, boxTarget.x, boxTarget.y);
+      if (furnDist < RANGE) {
+        const depL = Math.min(this.bp.logs, FURNACE_LOG_CAP - S.baseLogs);
+        const depR = Math.min(this.bp.rubble, FURNACE_RUBBLE_CAP - S.baseRubble);
+        if (depL > 0 || depR > 0) {
+          this.bp.logs -= depL; this.bp.rubble -= depR;
+          S.baseLogs += depL; S.baseRubble += depR;
+          if (depL > 0) S.furnaceEverFueled = true;
+          const parts: string[] = []; if (depL > 0) parts.push(`${depL} logs`); if (depR > 0) parts.push(`${depR} rubble`);
+          this.msg(`+${parts.join(' + ')} → Furnace`); sfx.build(); this.pileVis(); return;
+        } else {
+          this.msg('Furnace storage full!');
+        }
       }
     }
     // deposit logs at mill for refining
     if (this.mill) {
-      const d = Phaser.Math.Distance.Between(px, py, this.mill.sprite.x, this.mill.sprite.y);
+      const boxTarget = this.mill.box || this.mill.sprite;
+      const d = Phaser.Math.Distance.Between(px, py, boxTarget.x, boxTarget.y);
       if (d < RANGE && this.bp.logs > 0) { const a = this.bp.logs; this.bp.logs = 0; S.millInputLogs += a; this.msg(`+${a} logs → Mill (refining)`); sfx.build(); this.pileVis(); return; }
     }
     // deposit rubble at quarry for refining
     if (this.qry) {
-      const d = Phaser.Math.Distance.Between(px, py, this.qry.sprite.x, this.qry.sprite.y);
+      const boxTarget = this.qry.box || this.qry.sprite;
+      const d = Phaser.Math.Distance.Between(px, py, boxTarget.x, boxTarget.y);
       if (d < RANGE && this.bp.rubble > 0) { const a = this.bp.rubble; this.bp.rubble = 0; S.qryInputRubble += a; this.msg(`+${a} rubble → Quarry (refining)`); sfx.build(); this.pileVis(); return; }
     }
     // shelter
     const shelterKinds = ['igloo', 'woodHouse', 'stoneHouse'];
     for (const b of this.blds) {
       if (!shelterKinds.includes(b.kind)) continue;
-      const d = Phaser.Math.Distance.Between(px, py, b.sprite.x, b.sprite.y);
+      const boxTarget = b.box || b.sprite;
+      const d = Phaser.Math.Distance.Between(px, py, boxTarget.x, boxTarget.y);
       if (d < RANGE) { this.enterShelter(b); return; }
     }
     // bushes
@@ -696,6 +713,7 @@ class Game extends Phaser.Scene {
     // yield multiplier: iron tools give 2x on wood/stone
     let yieldAmt = (k === 'logs' || k === 'rubble') && S.toolTier >= 2 ? 2 : 1;
     if (S.techEfficiency && (k === 'logs' || k === 'rubble' || k === 'iron')) yieldAmt += 1;
+    if (S.difficulty === 0) yieldAmt *= 2;
     const canAdd = Math.min(yieldAmt, S.CAP - this.bpTotal());
     this.bp[k] += canAdd;
     sfx.hit();
@@ -766,8 +784,9 @@ class Game extends Phaser.Scene {
   /* ─── hunger & food ─── */
   private tickHunger(dt: number) {
     this.hungerClock += dt;
-    if (this.hungerClock >= HUNGER_TICK) {
-      this.hungerClock -= HUNGER_TICK;
+    const hungerThresh = S.difficulty === 0 ? HUNGER_TICK * 1.5 : S.difficulty === 2 ? HUNGER_TICK * 0.7 : HUNGER_TICK;
+    if (this.hungerClock >= hungerThresh) {
+      this.hungerClock -= hungerThresh;
       if (this.playerHunger > 0) this.playerHunger--;
       else { this.playerHp = Math.max(0, this.playerHp - 1); if (this.playerHp <= 0) this.gameOver('starved'); }
     }
@@ -810,7 +829,7 @@ class Game extends Phaser.Scene {
         S.baseLogs--;
         S.furnaceLit = true;
         if (this.furnace) this.furnace.sprite.clearTint();
-        const lightR = [380, 500, 800][this.furnaceLvl - 1];
+        const lightR = [450, 700, 1000][this.furnaceLvl - 1];
         this.fLight.setRadius(lightR);
       } else {
         S.furnaceLit = false;
@@ -830,7 +849,7 @@ class Game extends Phaser.Scene {
       this.inDeepFreeze = false;
     } else {
       // near furnace?
-      const heatRadius = [150, 300, 600][this.furnaceLvl - 1];
+      const heatRadius = [600, 1000, 1500][this.furnaceLvl - 1];
       const furnaceDist = this.furnace ? Phaser.Math.Distance.Between(this.p.x, this.p.y, this.furnace.sprite.x, this.furnace.sprite.y) : 9999;
       const nearFurnace = S.furnaceLit && furnaceDist < heatRadius;
       // near any torch?
@@ -856,6 +875,8 @@ class Game extends Phaser.Scene {
         else if (S.currentOutfit === 'steam') rate *= 0.7;
       }
     }
+    const diffMod = S.difficulty === 0 ? 0.5 : S.difficulty === 2 ? 1.5 : 1;
+    if (rate < 0) rate *= diffMod;
     this.playerTemp = Phaser.Math.Clamp(this.playerTemp + rate * sec, 0, this.MAX_TEMP);
     // freezing damage
     if (this.playerTemp <= 0) {
@@ -1099,7 +1120,7 @@ class Game extends Phaser.Scene {
       player: { x: this.p.x, y: this.p.y, hp: this.playerHp, hunger: this.playerHunger, temp: this.playerTemp },
       bp: { ...this.bp },
       base: { baseLogs: S.baseLogs, baseRubble: S.baseRubble, basePlanks: S.basePlanks, baseBricks: S.baseBricks, millInputLogs: S.millInputLogs, qryInputRubble: S.qryInputRubble },
-      progression: { hasBow: S.hasBow, currentOutfit: S.currentOutfit, hasBag: S.hasBag, furnaceLvl: this.furnaceLvl, furnaceEverFueled: S.furnaceEverFueled, furnaceLit: S.furnaceLit, toolTier: S.toolTier, toolDurability: S.toolDurability, toolMaxDurability: S.toolMaxDurability, bowDurability: S.bowDurability, glacialWallMelted: S.glacialWallMelted, hasSled: S.hasSled, techThickSkin: S.techThickSkin, techEfficiency: S.techEfficiency, furnaceMobile: S.furnaceMobile },
+      progression: { hasBow: S.hasBow, currentOutfit: S.currentOutfit, hasBag: S.hasBag, furnaceLvl: this.furnaceLvl, furnaceEverFueled: S.furnaceEverFueled, furnaceLit: S.furnaceLit, toolTier: S.toolTier, toolDurability: S.toolDurability, toolMaxDurability: S.toolMaxDurability, bowDurability: S.bowDurability, glacialWallMelted: S.glacialWallMelted, hasSled: S.hasSled, techThickSkin: S.techThickSkin, techEfficiency: S.techEfficiency, furnaceMobile: S.furnaceMobile, difficulty: S.difficulty },
       dayClock: this.world.dayClock,
       buildings,
       placedTorches: this.placedTorches.map(t => ({ x: t.x, y: t.y })),
@@ -1153,6 +1174,7 @@ class Game extends Phaser.Scene {
     S.techEfficiency = state.progression.techEfficiency ?? false;
     if (S.techThickSkin) this.MAX_HP = 150;
     S.furnaceMobile = state.progression.furnaceMobile ?? false;
+    S.difficulty = state.progression.difficulty ?? 1;
 
     // reposition furnace if mobile
     if (this.furnace && (state as any).furnacePos) {
@@ -1236,7 +1258,7 @@ class Game extends Phaser.Scene {
     // furnace visuals
     if (S.furnaceLit) {
       if (this.furnace) this.furnace.sprite.clearTint();
-      const lightR = [380, 500, 800][this.furnaceLvl - 1];
+      const lightR = [450, 700, 1000][this.furnaceLvl - 1];
       this.fLight.setRadius(lightR);
     } else {
       if (this.furnace) this.furnace.sprite.setTint(0x667788);
@@ -1347,6 +1369,12 @@ class Game extends Phaser.Scene {
       </div>
       <div id="settings-panel" style="display:none">
         <h3>⚙️ Settings</h3>
+        <label>⚙️ Difficulty</label>
+        <select id="diff-select" style="margin-bottom:10px; padding:4px; border-radius:4px; background:#1a1a2e; color:#fff; border:1px solid #444;">
+          <option value="0" ${S.difficulty === 0 ? 'selected' : ''}>Relaxed</option>
+          <option value="1" ${S.difficulty === 1 ? 'selected' : ''}>Standard</option>
+          <option value="2" ${S.difficulty === 2 ? 'selected' : ''}>Brutal</option>
+        </select>
         <label>🔊 Volume</label>
         <input type="range" id="vol-slider" min="0" max="100" value="${Math.round(sfx.getVolume() * 200)}" />
         <span id="vol-value">${Math.round(sfx.getVolume() * 200)}%</span>
@@ -1397,6 +1425,10 @@ class Game extends Phaser.Scene {
       menuBtns.style.display = 'none';
       this.settingsEl!.style.display = 'flex';
     };
+
+    // Difficulty selector
+    const diffSel = document.getElementById('diff-select') as HTMLSelectElement;
+    diffSel.onchange = () => { S.difficulty = parseInt(diffSel.value); };
 
     // Volume slider
     const slider = document.getElementById('vol-slider') as HTMLInputElement;

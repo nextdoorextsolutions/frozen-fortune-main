@@ -88,6 +88,26 @@ export class BuildingManager {
         const bar = s.add.graphics();
         const lbl = s.add.text(x, y - sprite.displayHeight / 2 - 20, '', { fontSize: '12px', color: '#fff', fontFamily: 'Arial', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
         const b: Bld = { sprite, kind, hp, maxHp: max, bar, lbl };
+        // place interaction zone box with manual isometric offsets
+        const shelterKinds = ['igloo', 'woodHouse', 'stoneHouse'];
+        const depositKinds = ['furnace', 'mill', 'quarry'];
+        const dropOffsets: Record<string, { x: number; y: number }> = {
+            furnace: { x: 0, y: 40 },
+            mill: { x: 30, y: 20 },
+            quarry: { x: -20, y: 30 },
+        };
+        const enterOffsets: Record<string, { x: number; y: number }> = {
+            igloo: { x: 0, y: 30 },
+            woodHouse: { x: 0, y: 35 },
+            stoneHouse: { x: 0, y: 40 },
+        };
+        if (shelterKinds.includes(kind)) {
+            const offset = enterOffsets[kind] || { x: 0, y: 30 };
+            b.box = s.add.sprite(x + offset.x, y + offset.y, 'enterBox').setScale(0.07).setDepth(sprite.y + 1);
+        } else if (depositKinds.includes(kind)) {
+            const offset = dropOffsets[kind] || { x: 0, y: 30 };
+            b.box = s.add.sprite(x + offset.x, y + offset.y, 'dropBox').setScale(0.07).setDepth(sprite.y + 1);
+        }
         s.blds.push(b);
         this.drawBar(b);
         return b;

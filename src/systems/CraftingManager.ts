@@ -221,7 +221,7 @@ export class CraftingManager {
             S.basePlanks -= 60; S.baseBricks -= 60; s.bp.pelts -= 10;
         }
         s.furnaceLvl = level;
-        const lightR = [380, 500, 800][level - 1];
+        const lightR = [450, 700, 1000][level - 1];
         s.fLight.setRadius(lightR);
         if (s.furnace) s.drawBar(s.furnace);
         s.pileVis();

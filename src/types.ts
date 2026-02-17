@@ -15,6 +15,7 @@ export interface Bld {
     maxHp: number;
     bar: Phaser.GameObjects.Graphics;
     lbl: Phaser.GameObjects.Text;
+    box?: Phaser.GameObjects.Sprite;
 }
 
 export interface Bush {
@@ -89,6 +90,7 @@ export interface GameState {
         techThickSkin: boolean;
         techEfficiency: boolean;
         furnaceMobile: boolean;
+        difficulty?: number;
     };
     dayClock: number;
     buildings: { x: number; y: number; kind: string; hp: number; tex?: string }[];

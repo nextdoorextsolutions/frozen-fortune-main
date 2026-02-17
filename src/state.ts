@@ -37,6 +37,9 @@ export const S = {
     /* dynamic caps */
     SPEED: 220,
     CAP: 20,
+
+    /* difficulty: 0=Relaxed, 1=Standard, 2=Brutal */
+    difficulty: 1 as number,
 };
 
 /** Reset all mutable state to defaults (new game) */
@@ -48,4 +51,5 @@ export function resetState() {
     S.toolTier = 0; S.toolDurability = 0; S.toolMaxDurability = 0; S.bowDurability = 0;
     S.techThickSkin = false; S.techEfficiency = false; S.glacialWallMelted = false;
     S.SPEED = 220; S.CAP = 20;
+    S.difficulty = 1;
 }

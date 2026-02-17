@@ -225,7 +225,8 @@ export class CombatManager {
             }
             if (!s.isInside && w.cd <= 0 && d < 30) {
                 w.cd = WOLF_CD;
-                const dmg = S.currentOutfit === 'hooded' ? 10 : WOLF_DMG;
+                let dmg = S.currentOutfit === 'hooded' ? 10 : WOLF_DMG;
+                dmg = Math.round(dmg * (S.difficulty === 0 ? 0.5 : S.difficulty === 2 ? 1.5 : 1));
                 s.playerHp = Math.max(0, s.playerHp - dmg);
                 s.cameras.main.shake(200, 0.008); this.sfx.hurt(); this.sfx.growl();
                 s.emitParticles(px, py, 'partBlood', 8);
